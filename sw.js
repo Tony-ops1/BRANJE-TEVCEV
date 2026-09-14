@@ -1,5 +1,5 @@
-const CACHE = "branje-stevcev-v6";
-const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./ocr-robust.js", "./auto-read.js"];
+const CACHE = "branje-stevcev-v7";
+const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./ocr-robust.js", "./auto-read.js", "./email-share.js"];
 
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(APP_SHELL)));
@@ -19,6 +19,9 @@ async function injectScripts(response) {
   }
   if (!injected.includes("auto-read.js")) {
     injected = injected.replace("</body>", '<script src="./auto-read.js?v=1"></script></body>');
+  }
+  if (!injected.includes("email-share.js")) {
+    injected = injected.replace("</body>", '<script src="./email-share.js?v=1"></script></body>');
   }
   const headers = new Headers(response.headers);
   headers.delete("content-length");

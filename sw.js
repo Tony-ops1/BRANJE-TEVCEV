@@ -1,4 +1,4 @@
-const CACHE = "branje-stevcev-v4";
+const CACHE = "branje-stevcev-v5";
 const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./ocr-robust.js", "./auto-read.js"];
 
 self.addEventListener("install", event => {
@@ -15,10 +15,10 @@ async function injectScripts(response) {
   const text = await response.text();
   let injected = text;
   if (!injected.includes("ocr-robust.js")) {
-    injected = injected.replace("</body>", '<script src="./ocr-robust.js?v=3"></script></body>');
+    injected = injected.replace("</body>", '<script src="./ocr-robust.js?v=5"></script></body>');
   }
   if (!injected.includes("auto-read.js")) {
-    injected = injected.replace("</body>", '<script src="./auto-read.js?v=1"></script></body>');
+    injected = injected.replace("</body>", '<script src="./auto-read.js?v=2"></script></body>');
   }
   const headers = new Headers(response.headers);
   headers.delete("content-length");

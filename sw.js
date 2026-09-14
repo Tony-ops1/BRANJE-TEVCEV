@@ -1,5 +1,5 @@
-const CACHE = "branje-stevcev-v3";
-const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./ocr-robust.js"];
+const CACHE = "branje-stevcev-v4";
+const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./ocr-robust.js", "./auto-read.js"];
 
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(APP_SHELL)));
@@ -11,10 +11,15 @@ self.addEventListener("activate", event => {
   self.clients.claim();
 });
 
-async function injectRobustOCR(response) {
+async function injectScripts(response) {
   const text = await response.text();
-  if (text.includes("ocr-robust.js")) return new Response(text, {status: response.status, statusText: response.statusText, headers: response.headers});
-  const injected = text.replace("</body>", '<script src="./ocr-robust.js?v=3"></script></body>');
+  let injected = text;
+  if (!injected.includes("ocr-robust.js")) {
+    injected = injected.replace("</body>", '<script src="./ocr-robust.js?v=3"></script></body>');
+  }
+  if (!injected.includes("auto-read.js")) {
+    injected = injected.replace("</body>", '<script src="./auto-read.js?v=1"></script></body>');
+  }
   const headers = new Headers(response.headers);
   headers.delete("content-length");
   headers.delete("content-encoding");
@@ -33,10 +38,10 @@ self.addEventListener("fetch", event => {
         const net = await fetch(event.request, {cache:"no-store"});
         const copy = net.clone();
         caches.open(CACHE).then(cache => cache.put(event.request, copy)).catch(() => {});
-        return await injectRobustOCR(net);
+        return await injectScripts(net);
       } catch (_) {
         const cached = await caches.match(event.request) || await caches.match("./index.html");
-        return cached ? await injectRobustOCR(cached) : Response.error();
+        return cached ? await injectScripts(cached) : Response.error();
       }
     })());
     return;

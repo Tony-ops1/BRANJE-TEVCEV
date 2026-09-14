@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="sl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Branje števcev</title>
+<meta name="theme-color" content="#0b5e3b">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  :root{
+    --bg:#eef4e8; --card:#fffdf6; --text:#183022; --muted:#647266;
+    --primary:#0b5e3b; --ok:#137333; --warn:#9a6b00; --bad:#a12622;
+    --border:#d6dfcc; --gold:#d2a22a; --lightgreen:#dfead7; --darkgreen:#084b30;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:linear-gradient(180deg, #edf5e8 0%, #f7f4df 46%, #e3eddc 100%);color:var(--text)}
+  header{position:sticky;top:0;background:linear-gradient(90deg, var(--darkgreen) 0%, var(--primary) 62%, var(--gold) 100%);color:#fff;padding:14px 16px;z-index:10;box-shadow:0 2px 10px #00000022}
+  header h1{font-size:20px;margin:0}
+  header small{opacity:.9}
+  main{max-width:900px;margin:auto;padding:14px}
+  .card{position:relative;overflow:hidden;background:linear-gradient(180deg, #fffef8 0%, #f8fbf2 100%);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:14px;box-shadow:0 3px 12px #00000012}
+  .card::before{content:"";position:absolute;left:0;top:0;width:100%;height:4px;background:linear-gradient(90deg,var(--darkgreen) 0%,var(--primary) 62%,var(--gold) 100%)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media(max-width:700px){.grid{grid-template-columns:1fr}}
+  label{font-weight:650;font-size:14px;display:block;margin-bottom:5px}
+  input,select,button,textarea{font:inherit}
+  input,select{width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;background:#fff}
+  input.invalid{border:2px solid var(--bad);background:#fff4f3}
+  input.warn{border:2px solid #d99100;background:#fff8e7}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  button{border:0;border-radius:10px;padding:12px 14px;font-weight:700;cursor:pointer}
+  .primary{background:linear-gradient(90deg, var(--darkgreen) 0%, var(--primary) 72%, var(--gold) 100%);color:#fff}
+  .secondary{background:#e6eddc;color:#23452f}
+  .danger{background:#fde8e7;color:#8c1d18}
+  .ok{background:#e8f5e9;color:#0e6b2d}
+  #preview{width:100%;max-height:380px;object-fit:contain;border-radius:10px;background:#eef2f7;display:none;margin-top:10px}
+  #ocrBox{white-space:pre-wrap;background:#f7f9fc;border:1px solid var(--border);border-radius:10px;padding:10px;max-height:160px;overflow:auto;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+  .status{font-weight:750}
+  .status.oktxt{color:var(--ok)} .status.warntxt{color:var(--warn)} .status.badtxt{color:var(--bad)}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{padding:9px 8px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+  th{background:linear-gradient(90deg, #dce9d4 0%, #f3e7b6 100%);position:sticky;top:72px}
+  .scroll{overflow:auto;max-height:420px;border:1px solid var(--border);border-radius:10px}
+  .pill{display:inline-block;padding:3px 8px;border-radius:999px;font-size:12px;font-weight:700}
+  .pill.ok{background:linear-gradient(90deg, #dcebd7 0%, #f1e2a6 100%);color:#0e6b2d}
+  .pill.warn{background:#fff1ce;color:#875200}
+  .help{font-size:13px;color:var(--muted);line-height:1.45}
+  .counter{font-weight:800;font-size:18px}
+  .runtime-warning{display:none;margin:0 0 14px;padding:12px 14px;border-radius:12px;background:#fff4cf;border:1px solid #d2a22a;color:#4e3b00;font-weight:650;line-height:1.4}
+  .runtime-warning strong{display:block;margin-bottom:4px}
+  footer{padding:10px 16px 24px;text-align:center;color:var(--muted);font-size:12px;background:linear-gradient(90deg, #dfead7 0%, #f5edcc 100%)}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>📷 Branje števcev</h1>
+  <small>MKN · TIP MKN · leto · proizvajalec</small>
+</header>
+
+<main>
+  <div id="runtimeWarning" class="runtime-warning">
+    <strong>⚠️ Aplikacija je odprta kot datoteka, ne kot spletna stran.</strong>
+    Kamera/OCR in izvoz lahko v iCloud/Google Drive predogledu ne delujejo. Objavi mapo na HTTPS gostovanju in odpri povezavo v Safari/Chrome.
+  </div>
+  <section class="card">
+    <div class="counter">1. Slikaj števec</div>
+    <input id="photo" type="file" accept="image/*" capture="environment">
+    <img id="preview" alt="Predogled">
+    <div class="btnrow">
+      <button class="primary" id="readBtn">🔎 Preberi podatke</button>
+      <button class="secondary" id="clearPhotoBtn">Počisti sliko</button>
+    </div>
+    <p id="ocrStatus" class="help">Po slikanju pritisni »Preberi podatke«.</p>
+  </section>
+
+  <section class="card">
+    <div class="counter">2. Preveri podatke</div>
+    <div class="grid">
+      <div>
+        <label for="mkn">MKN</label>
+        <input id="mkn" inputmode="numeric" maxlength="8" placeholder="npr. 97053767">
+        <div class="help">Varovalka: praviloma točno 8 številk.</div>
+      </div>
+      <div>
+        <label for="tip">TIP MKN</label>
+        <input id="tip" inputmode="numeric" maxlength="4" placeholder="npr. 1532">
+        <div class="help">Varovalka: točno 4 številke.</div>
+      </div>
+      <div>
+        <label for="year">Leto</label>
+        <input id="year" inputmode="numeric" maxlength="4" placeholder="npr. 2011">
+        <div class="help">Varovalka: 1990–trenutno leto.</div>
+      </div>
+      <div>
+        <label for="maker">Proizvajalec</label>
+        <input id="maker" placeholder="npr. Landis+Gyr ali ISKRA">
+        <div class="help">Če ni zanesljivo prepoznan, ga lahko popraviš ročno.</div>
+      </div>
+    </div>
+    <p>Stanje: <span id="validationStatus" class="status">—</span></p>
+    <div class="btnrow">
+      <button class="ok" id="saveBtn">💾 Shrani vrstico</button>
+      <button class="secondary" id="newBtn">📷 Naslednji števec</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary><strong>Prepoznano besedilo (za kontrolo)</strong></summary>
+      <div id="ocrBox">—</div>
+    </details>
+  </section>
+
+  <section class="card">
+    <div class="counter">3. Tabela</div>
+    <p class="help">Podatki se shranjujejo tudi v brskalnik, zato ostanejo po zaprtju strani.</p>
+    <div class="scroll">
+      <table id="tbl">
+        <thead>
+          <tr><th>#</th><th>MKN</th><th>TIP MKN</th><th>Leto</th><th>Proizvajalec</th><th>Datum</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="btnrow">
+      <button class="primary" id="xlsxBtn">📊 Izvozi Excel (.xlsx)</button>
+      <button class="secondary" id="csvBtn">Izvozi CSV</button>
+      <button class="danger" id="wipeBtn">Izbriši vse</button>
+    </div>
+  </section>
+</main>
+
+<footer>Prva delovna različica · zelena in zlata tema · podatke vedno hitro preveri pred shranjevanjem</footer>
+
+<script>
+window.addEventListener("DOMContentLoaded", () => {
+  const warning = document.getElementById("runtimeWarning");
+  const isFile = location.protocol === "file:";
+  if (warning && isFile) warning.style.display = "block";
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
+  }
+});
+</script>
+
+<script>
+const $ = id => document.getElementById(id);
+const CURRENT_YEAR = new Date().getFullYear();
+let records = JSON.parse(localStorage.getItem("meter_records_v1") || "[]");
+let imageDataUrl = null;
+
+function saveLocal(){ localStorage.setItem("meter_records_v1", JSON.stringify(records)); }
+function onlyDigits(s){ return (s || "").replace(/\D/g,""); }
+
+function validateFields(){
+  const mkn = onlyDigits($("mkn").value);
+  const tip = onlyDigits($("tip").value);
+  const year = onlyDigits($("year").value);
+  $("mkn").value = mkn.slice(0,8);
+  $("tip").value = tip.slice(0,4);
+  $("year").value = year.slice(0,4);
+
+  let issues = [];
+  $("mkn").classList.remove("invalid","warn");
+  $("tip").classList.remove("invalid","warn");
+  $("year").classList.remove("invalid","warn");
+
+  if(mkn.length !== 8){ $("mkn").classList.add("invalid"); issues.push("MKN mora imeti 8 številk"); }
+  if(tip.length !== 4){ $("tip").classList.add("invalid"); issues.push("TIP MKN mora imeti 4 številke"); }
+  const y = Number(year);
+  if(year.length !== 4 || y < 1990 || y > CURRENT_YEAR){
+    $("year").classList.add("invalid"); issues.push("leto ni veljavno");
+  }
+
+  const duplicate = records.some(r => r.mkn === mkn && mkn.length === 8);
+  if(duplicate){
+    $("mkn").classList.add("warn");
+    issues.push("MKN že obstaja v tabeli");
+  }
+
+  const el = $("validationStatus");
+  if(issues.length === 0){
+    el.textContent = "✅ OK";
+    el.className = "status oktxt";
+    return {ok:true, duplicate:false};
+  }else{
+    el.textContent = "⚠️ " + issues.join(" · ");
+    el.className = "status warntxt";
+    return {ok:false, duplicate};
+  }
+}
+
+["mkn","tip","year","maker"].forEach(id => $(id).addEventListener("input", validateFields));
+
+$("photo").addEventListener("change", e => {
+  const f = e.target.files?.[0];
+  if(!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    imageDataUrl = reader.result;
+    $("preview").src = imageDataUrl;
+    $("preview").style.display = "block";
+  };
+  reader.readAsDataURL(f);
+});
+
+$("clearPhotoBtn").onclick = () => {
+  $("photo").value = "";
+  imageDataUrl = null;
+  $("preview").style.display = "none";
+  $("preview").src = "";
+  $("ocrBox").textContent = "—";
+  $("ocrStatus").textContent = "Slika počiščena.";
+};
+
+function normalizeOCR(text){
+  return (text || "")
+    .replace(/[|]/g,"I")
+    .replace(/[Oo]/g,"0")
+    .replace(/[Il]/g,"1");
+}
+
+function extractData(rawText){
+  const text = rawText || "";
+  const normalized = normalizeOCR(text);
+  const lines = text.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+
+  let maker = "";
+  if(/landis\s*\+?\s*gyr|landisgyr/i.test(text)) maker = "Landis+Gyr";
+  else if(/\biskra\b/i.test(text)) maker = "ISKRA";
+
+  const years = [...text.matchAll(/\b(19[9]\d|20[0-2]\d)\b/g)]
+    .map(m => Number(m[1]))
+    .filter(y => y >= 1990 && y <= CURRENT_YEAR);
+  let year = years.length ? String(years[0]) : "";
+
+  const known = ["1483","1504","1505","1508","1531","1532","1563","1580","1581","1631","1632","1633","1638","1639","1661","1676","1680","1681","1682","1687"];
+  let tip = "";
+  for(const k of known){
+    if(new RegExp("(^|\\D)"+k+"(\\D|$)").test(normalized)){ tip = k; break; }
+  }
+  if(!tip){
+    const c4 = [...normalized.matchAll(/(?<!\d)(\d{4})(?!\d)/g)].map(m=>m[1]);
+    tip = c4.find(x => {
+      const n = Number(x);
+      return n >= 1400 && n <= 1800 && !/^20\d{2}$/.test(x);
+    }) || "";
+  }
+
+  let mkn = "";
+  const labeled = lines.find(l => /MKN/i.test(l));
+  if(labeled){
+    const m = normalizeOCR(labeled).match(/(?<!\d)(\d{8})(?!\d)/);
+    if(m) mkn = m[1];
+  }
+  if(!mkn){
+    const c8 = [...normalized.matchAll(/(?<!\d)(\d{8})(?!\d)/g)].map(m=>m[1]);
+    mkn = c8.find(x => !/^20\d{6}$/.test(x)) || "";
+  }
+
+  return {mkn, tip, year, maker};
+}
+
+$("readBtn").onclick = async () => {
+  const f = $("photo").files?.[0];
+  if(!f){ alert("Najprej slikaj ali izberi fotografijo števca."); return; }
+  $("readBtn").disabled = true;
+  $("ocrStatus").textContent = "Berem fotografijo… pri prvi uporabi lahko traja malo dlje.";
+  try{
+    if (typeof Tesseract === "undefined") {
+      throw new Error("OCR knjižnica se ni naložila. Odpri aplikacijo prek HTTPS in preveri internetno povezavo.");
+    }
+    const result = await Tesseract.recognize(f, "eng", {
+      logger: m => {
+        if(m.status === "recognizing text"){
+          $("ocrStatus").textContent = "Berem fotografijo… " + Math.round((m.progress || 0)*100) + "%";
+        }else{
+          $("ocrStatus").textContent = "OCR: " + (m.status || "obdelava");
+        }
+      }
+    });
+    const raw = result.data.text || "";
+    $("ocrBox").textContent = raw || "(ni prepoznanega besedila)";
+    const d = extractData(raw);
+    $("mkn").value = d.mkn;
+    $("tip").value = d.tip;
+    $("year").value = d.year;
+    $("maker").value = d.maker;
+    validateFields();
+    $("ocrStatus").textContent = "Končano. Preveri podatke in pritisni »Shrani vrstico«.";
+  }catch(err){
+    console.error(err);
+    $("ocrStatus").textContent = "Napaka pri OCR: " + (err?.message || "preveri povezavo in način odpiranja aplikacije");
+    alert("OCR ni uspel. Če aplikacijo odpiraš iz iCloud/Google Drive predogleda, jo objavi kot HTTPS spletno stran.");
+  }finally{
+    $("readBtn").disabled = false;
+  }
+};
+
+$("saveBtn").onclick = () => {
+  const v = validateFields();
+  if(!v.ok){
+    if(v.duplicate){
+      if(!confirm("Ta MKN je že v tabeli. Ga vseeno želiš shraniti še enkrat?")) return;
+    }else{
+      alert("Pred shranjevanjem popravi označena polja.");
+      return;
+    }
+  }
+  const rec = {
+    mkn: $("mkn").value,
+    tip: $("tip").value,
+    year: $("year").value,
+    maker: $("maker").value.trim(),
+    date: new Date().toLocaleDateString("sl-SI"),
+    status: "OK"
+  };
+  records.push(rec);
+  saveLocal();
+  render();
+  alert("Vrstica je shranjena.");
+};
+
+function resetForNext(){
+  $("mkn").value = "";
+  $("tip").value = "";
+  $("year").value = "";
+  $("maker").value = "";
+  $("photo").value = "";
+  imageDataUrl = null;
+  $("preview").style.display = "none";
+  $("preview").src = "";
+  $("ocrBox").textContent = "—";
+  $("ocrStatus").textContent = "Pripravljeno za naslednji števec.";
+  $("validationStatus").textContent = "—";
+  $("validationStatus").className = "status";
+  ["mkn","tip","year"].forEach(id => $(id).classList.remove("invalid","warn"));
+  window.scrollTo({top:0, behavior:"smooth"});
+}
+$("newBtn").onclick = resetForNext;
+
+function render(){
+  const tb = $("tbl").querySelector("tbody");
+  tb.innerHTML = "";
+  records.forEach((r,i)=>{
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${i+1}</td>
+      <td>${r.mkn}</td>
+      <td>${r.tip}</td>
+      <td>${r.year}</td>
+      <td>${escapeHtml(r.maker)}</td>
+      <td>${r.date}</td>
+      <td><span class="pill ok">OK</span></td>
+      <td><button class="danger" onclick="deleteRow(${i})">✕</button></td>`;
+    tb.appendChild(tr);
+  });
+}
+function escapeHtml(s){
+  return String(s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+}
+window.deleteRow = i => {
+  if(confirm("Izbrišem to vrstico?")){
+    records.splice(i,1); saveLocal(); render(); validateFields();
+  }
+};
+
+$("wipeBtn").onclick = () => {
+  if(confirm("Res izbrišem VSE shranjene števce?")){
+    records = []; saveLocal(); render(); validateFields();
+  }
+};
+
+function exportRows(){
+  return records.map((r,i)=>({
+    "Zap. št.": i+1,
+    "MKN": r.mkn,
+    "TIP MKN": r.tip,
+    "Leto": Number(r.year) || r.year,
+    "Proizvajalec": r.maker,
+    "Datum": r.date,
+    "Status": r.status
+  }));
+}
+
+$("xlsxBtn").onclick = () => {
+  if(!records.length){ alert("Tabela je prazna."); return; }
+  if (typeof XLSX === "undefined") {
+    alert("Excel knjižnica se ni naložila. Uporabi CSV ali aplikacijo odpri prek HTTPS.");
+    return;
+  }
+  const ws = XLSX.utils.json_to_sheet(exportRows());
+  ws["!cols"] = [
+    {wch:9},{wch:13},{wch:12},{wch:9},{wch:20},{wch:13},{wch:10}
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Števci");
+  const d = new Date();
+  const pad = n => String(n).padStart(2,"0");
+  const name = `stevci_${pad(d.getDate())}-${pad(d.getMonth()+1)}-${d.getFullYear()}.xlsx`;
+  XLSX.writeFile(wb, name);
+};
+
+$("csvBtn").onclick = () => {
+  if(!records.length){ alert("Tabela je prazna."); return; }
+  let csv;
+  if (typeof XLSX !== "undefined") {
+    const ws = XLSX.utils.json_to_sheet(exportRows());
+    csv = XLSX.utils.sheet_to_csv(ws, {FS:";"});
+  } else {
+    const headers = ["Zap. št.","MKN","TIP MKN","Leto","Proizvajalec","Datum","Status"];
+    const lines = [headers, ...exportRows().map(r => headers.map(h => r[h]))];
+    csv = lines.map(row => row.map(v => `"${String(v ?? "").replace(/"/g,'""')}"`).join(";")).join("\n");
+  }
+  const blob = new Blob(["\ufeff"+csv], {type:"text/csv;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "stevci.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+render();
+validateFields();
+</script>
+</body>
+</html>

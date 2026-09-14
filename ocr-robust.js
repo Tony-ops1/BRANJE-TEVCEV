@@ -21,6 +21,26 @@
     return KNOWN_TIPS.includes(x) || (n >= 1400 && n <= 1799);
   }
 
+  function findLoosePair(text) {
+    const rawLines = String(text || '').split(/\r?\n/).map(x => normalize(x));
+    const groups = [...rawLines];
+    for (let i = 0; i < rawLines.length - 1; i++) groups.push(rawLines[i] + ' ' + rawLines[i + 1]);
+
+    for (const line of groups) {
+      const ds = digits(line);
+      if (ds.length < 12) continue;
+      for (const tip of KNOWN_TIPS) {
+        let pos = ds.indexOf(tip);
+        while (pos >= 0) {
+          const candidate = ds.slice(pos + 4, pos + 12);
+          if (/^\d{8}$/.test(candidate)) return {tip, mkn:candidate};
+          pos = ds.indexOf(tip, pos + 1);
+        }
+      }
+    }
+    return null;
+  }
+
   function extract(text) {
     text = text || '';
     const ntext = normalize(text);
@@ -37,16 +57,21 @@
     }
 
     let tip = '', mkn = '', pairFound = false;
-    const pairPatterns = [
-      /(^|\D)(1[4-7]\d{2})\s*[-.:/ ]{0,12}\s*(\d{8})(?!\d)/gm,
-      /(^|\D)(1[4-7]\d{2})(\d{8})(?!\d)/gm
-    ];
-    for (const re of pairPatterns) {
-      let m;
-      while ((m = re.exec(ntext))) {
-        if (validTip(m[2])) { tip = m[2]; mkn = m[3]; pairFound = true; break; }
+    const loose = findLoosePair(text);
+    if (loose) { tip = loose.tip; mkn = loose.mkn; pairFound = true; }
+
+    if (!pairFound) {
+      const pairPatterns = [
+        /(^|\D)(1[4-7]\d{2})\s*[-.:/ ]{0,18}\s*(\d{8})(?!\d)/gm,
+        /(^|\D)(1[4-7]\d{2})(\d{8})(?!\d)/gm
+      ];
+      for (const re of pairPatterns) {
+        let m;
+        while ((m = re.exec(ntext))) {
+          if (validTip(m[2])) { tip = m[2]; mkn = m[3]; pairFound = true; break; }
+        }
+        if (pairFound) break;
       }
-      if (pairFound) break;
     }
 
     if (!pairFound) {
@@ -68,6 +93,16 @@
     }
 
     if (!mkn) {
+      const lines = ntext.split(/\r?\n/);
+      for (const line of lines) {
+        if (/\b(ST|ŠT|STEV|STEVI|NO|NR)\b/.test(line)) {
+          const ds = digits(line);
+          const mm = ds.match(/\d{8}/);
+          if (mm) { mkn = mm[0]; break; }
+        }
+      }
+    }
+    if (!mkn) {
       const c8 = [...ntext.matchAll(/(?<!\d)(\d{8})(?!\d)/g)].map(m => m[1]);
       mkn = c8.find(x => !/^20\d{6}$/.test(x)) || '';
     }
@@ -76,7 +111,7 @@
   }
 
   function score(d) {
-    return (d.mkn?8:0) + (d.tip?7:0) + (d.year?4:0) + (d.maker?2:0) + (d.pairFound?5:0);
+    return (d.mkn?8:0) + (d.tip?7:0) + (d.year?4:0) + (d.maker?2:0) + (d.pairFound?6:0);
   }
   function complete(d) { return !!(d.mkn && d.tip && d.year && d.maker); }
   function coreComplete(d) { return !!(d.mkn && d.tip && d.year); }
@@ -109,7 +144,7 @@
     });
   }
 
-  function makeCanvas(img, angle=0, maxSide=1150, contrast=false) {
+  function makeCanvas(img, angle=0, maxSide=1100, contrast=false) {
     const iw = img.width || img.naturalWidth, ih = img.height || img.naturalHeight;
     const scale = Math.min(1, maxSide / Math.max(iw, ih));
     const w = Math.max(1, Math.round(iw * scale));
@@ -121,8 +156,25 @@
     const ctx = c.getContext('2d', {alpha:false});
     ctx.fillStyle = '#fff'; ctx.fillRect(0,0,cw,ch);
     ctx.translate(cw/2,ch/2); ctx.rotate(a);
-    if (contrast && 'filter' in ctx) ctx.filter = 'grayscale(1) contrast(1.45) brightness(1.05)';
+    if (contrast && 'filter' in ctx) ctx.filter = 'grayscale(1) contrast(1.55) brightness(1.06)';
     ctx.drawImage(img,-w/2,-h/2,w,h);
+    return c;
+  }
+
+  function makeCropCanvas(img, xPct, yPct, wPct, hPct, maxSide=1650, contrast=true) {
+    const iw = img.width || img.naturalWidth, ih = img.height || img.naturalHeight;
+    const sx = Math.max(0, Math.round(iw * xPct));
+    const sy = Math.max(0, Math.round(ih * yPct));
+    const sw = Math.max(1, Math.min(iw - sx, Math.round(iw * wPct)));
+    const sh = Math.max(1, Math.min(ih - sy, Math.round(ih * hPct)));
+    const scale = Math.min(3, maxSide / Math.max(sw, sh));
+    const cw = Math.max(1, Math.round(sw * scale));
+    const ch = Math.max(1, Math.round(sh * scale));
+    const c = document.createElement('canvas'); c.width = cw; c.height = ch;
+    const ctx = c.getContext('2d', {alpha:false});
+    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,cw,ch);
+    if (contrast && 'filter' in ctx) ctx.filter = 'grayscale(1) contrast(1.75) brightness(1.08)';
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
     return c;
   }
 
@@ -139,9 +191,7 @@
       const found = await det.detect(canvas);
       for (const b of found) {
         const d = digits(b.rawValue);
-        if (d.length === 12 && validTip(d.slice(0,4))) {
-          return {tip:d.slice(0,4), mkn:d.slice(4)};
-        }
+        if (d.length === 12 && validTip(d.slice(0,4))) return {tip:d.slice(0,4), mkn:d.slice(4)};
       }
     } catch (_) {}
     return null;
@@ -154,10 +204,13 @@
     return {d, text:ret.data?.text || '', score:score(d)};
   }
 
-  function merge(a,b) {
+  function merge(a,b, preferPair=false) {
     const out = {...a};
+    if (preferPair && b.pairFound && b.mkn && b.tip) {
+      out.mkn = b.mkn; out.tip = b.tip; out.pairFound = true;
+    }
     for (const k of ['mkn','tip','year','maker']) if (!out[k] && b[k]) out[k] = b[k];
-    out.pairFound = !!(a.pairFound || b.pairFound);
+    out.pairFound = !!(out.pairFound || b.pairFound);
     return out;
   }
 
@@ -171,26 +224,34 @@
     let img;
     try {
       img = await loadImage(file);
-      const fastCanvas = makeCanvas(img, 0, 1150, false);
+      const fastCanvas = makeCanvas(img, 0, 1050, false);
       const barcode = await detectBarcode(fastCanvas);
       let best = {mkn:barcode?.mkn || '', tip:barcode?.tip || '', year:'', maker:'', pairFound:!!barcode};
       const logs = barcode ? [`Črtna koda: ${barcode.tip} ${barcode.mkn}`] : [];
 
       const w = await getWorker();
       const first = await runOcr(w, fastCanvas, 'Hitro branje');
-      best = merge(best, first.d);
+      best = merge(best, first.d, true);
       logs.push(first.text);
 
+      // Poseben hiter povečani izrez: pri E450 in podobnih števcih so MKN/TIP/leto pogosto majhni na sredini nalepke.
+      if (!coreComplete(best) || !best.pairFound) {
+        const crop = makeCropCanvas(img, 0.08, 0.18, 0.84, 0.58, 1750, true);
+        const focused = await runOcr(w, crop, 'Povečujem nalepko');
+        best = merge(best, focused.d, true);
+        logs.push(focused.text);
+      }
+
       if (!complete(best)) {
-        const second = await runOcr(w, makeCanvas(img, 0, 1450, true), 'Dodatna kontrola');
-        best = merge(best, second.d);
+        const second = await runOcr(w, makeCanvas(img, 0, 1350, true), 'Dodatna kontrola');
+        best = merge(best, second.d, true);
         logs.push(second.text);
       }
 
       if (!coreComplete(best)) {
         for (const a of [90,-90,180]) {
-          const r = await runOcr(w, makeCanvas(img, a, 1300, true), `Rezervno branje ${a}°`);
-          best = merge(best, r.d);
+          const r = await runOcr(w, makeCanvas(img, a, 1200, true), `Rezervno branje ${a}°`);
+          best = merge(best, r.d, true);
           logs.push(r.text);
           if (coreComplete(best)) break;
         }

@@ -1,0 +1,10 @@
+{
+  "name": "Branje števcev",
+  "short_name": "Števci",
+  "lang": "sl",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#eef4e8",
+  "theme_color": "#0b5e3b",
+  "description": "Branje MKN, TIP MKN, leta in proizvajalca ter izvoz v Excel."
+}

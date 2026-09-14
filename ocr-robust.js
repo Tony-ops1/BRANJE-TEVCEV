@@ -3,7 +3,11 @@
   if (!btn) return;
 
   const CURRENT = new Date().getFullYear();
-  const KNOWN_TIPS = ['1483','1504','1505','1508','1531','1532','1563','1580','1581','1631','1632','1633','1638','1639','1661','1676','1680','1681','1682','1687'];
+  const METER_TIPS = [
+    '1483','1504','1505','1508','1509','1531','1532','1563','1580','1581',
+    '1591','1631','1632','1633','1638','1639','1661','1676','1679','1680','1681','1682','1687'
+  ];
+  const MODULE_TIPS = new Set(['1584']); // Flex II / PLC modul - ni glavni števec
   let worker = null;
   let progressLabel = 'OCR';
   const el = id => document.getElementById(id);
@@ -16,35 +20,68 @@
   }
   function digits(s) { return normalize(s).replace(/[^0-9]/g,''); }
   function validTip(x) {
-    if (!/^\d{4}$/.test(x)) return false;
+    if (!/^\d{4}$/.test(x) || MODULE_TIPS.has(x)) return false;
     const n = Number(x);
-    return KNOWN_TIPS.includes(x) || (n >= 1400 && n <= 1799);
+    return METER_TIPS.includes(x) || (n >= 1400 && n <= 1799);
   }
 
-  function findLoosePair(text) {
-    const rawLines = String(text || '').split(/\r?\n/).map(x => normalize(x));
-    const groups = [...rawLines];
-    for (let i = 0; i < rawLines.length - 1; i++) groups.push(rawLines[i] + ' ' + rawLines[i + 1]);
+  function contextScore(s) {
+    const u = String(s || '').toUpperCase();
+    let score = 0;
+    if (/TRIFAZ|ENOFAZ|STEVEC|ŠTEVEC/.test(u)) score += 55;
+    if (/LANDIS|ISKRA|E450|E350|AM550|ZMF|ZMX|ZCF/.test(u)) score += 28;
+    if (/FLEX\s*II|PLC\s*MODULE|PLC\s*MODUL|AD[- ]?CP|AD[- ]?FP/.test(u)) score -= 180;
+    return score;
+  }
 
-    for (const line of groups) {
-      const ds = digits(line);
-      if (ds.length < 12) continue;
-      for (const tip of KNOWN_TIPS) {
-        let pos = ds.indexOf(tip);
-        while (pos >= 0) {
-          const candidate = ds.slice(pos + 4, pos + 12);
-          if (/^\d{8}$/.test(candidate)) return {tip, mkn:candidate};
-          pos = ds.indexOf(tip, pos + 1);
+  function pairCandidates(text) {
+    const raw = String(text || '');
+    const lines = raw.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+    const out = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const groups = [lines[i]];
+      if (i + 1 < lines.length) groups.push(lines[i] + ' ' + lines[i + 1]);
+      if (i + 2 < lines.length) groups.push(lines[i] + ' ' + lines[i + 1] + ' ' + lines[i + 2]);
+
+      for (const group of groups) {
+        const ds = digits(group);
+        if (ds.length < 12) continue;
+        for (const tip of METER_TIPS) {
+          let p = ds.indexOf(tip);
+          while (p >= 0) {
+            const mkn = ds.slice(p + 4, p + 12);
+            if (/^\d{8}$/.test(mkn)) {
+              const near = [lines[i-2],lines[i-1],group,lines[i+1],lines[i+2]].filter(Boolean).join(' ');
+              let sc = 100 + contextScore(near);
+              sc += Math.max(0, 20 - i); // rahla prednost glavnemu števcu, ki je običajno višje
+              if (tip === '1591') sc += 8; // E350 števec; 1584 spodaj je Flex II modul
+              out.push({tip,mkn,score:sc});
+            }
+            p = ds.indexOf(tip, p + 1);
+          }
         }
       }
     }
-    return null;
+
+    // neposreden vzorec TIP + MKN z razmiki/ločili
+    const ntext = normalize(raw);
+    const re = /(^|\D)(1[4-7]\d{2})[^0-9]{0,24}(\d{8})(?!\d)/gm;
+    let m;
+    while ((m = re.exec(ntext))) {
+      if (validTip(m[2])) {
+        const around = raw.slice(Math.max(0,m.index-120), Math.min(raw.length,re.lastIndex+120));
+        out.push({tip:m[2],mkn:m[3],score:95+contextScore(around)});
+      }
+    }
+
+    out.sort((a,b) => b.score - a.score);
+    return out;
   }
 
   function extract(text) {
     text = text || '';
     const ntext = normalize(text);
-    const compact = ntext.replace(/[^0-9A-Z]+/g, ' ');
     let maker = '';
     if (/LANDIS\s*\+?\s*GYR|LANDISGYR|\bLANDIS\b|\bGYR\b/i.test(text)) maker = 'Landis+Gyr';
     else if (/\bISKRA\b/i.test(text)) maker = 'ISKRA';
@@ -57,33 +94,15 @@
     }
 
     let tip = '', mkn = '', pairFound = false;
-    const loose = findLoosePair(text);
-    if (loose) { tip = loose.tip; mkn = loose.mkn; pairFound = true; }
-
-    if (!pairFound) {
-      const pairPatterns = [
-        /(^|\D)(1[4-7]\d{2})\s*[-.:/ ]{0,18}\s*(\d{8})(?!\d)/gm,
-        /(^|\D)(1[4-7]\d{2})(\d{8})(?!\d)/gm
-      ];
-      for (const re of pairPatterns) {
-        let m;
-        while ((m = re.exec(ntext))) {
-          if (validTip(m[2])) { tip = m[2]; mkn = m[3]; pairFound = true; break; }
-        }
-        if (pairFound) break;
-      }
-    }
-
-    if (!pairFound) {
-      const runs = compact.match(/\b\d{12}\b/g) || [];
-      for (const r of runs) {
-        const t = r.slice(0,4), m = r.slice(4);
-        if (validTip(t)) { tip = t; mkn = m; pairFound = true; break; }
-      }
+    const candidates = pairCandidates(text);
+    if (candidates.length) {
+      tip = candidates[0].tip;
+      mkn = candidates[0].mkn;
+      pairFound = true;
     }
 
     if (!tip) {
-      for (const k of KNOWN_TIPS) {
+      for (const k of METER_TIPS) {
         if (new RegExp('(^|\\D)' + k + '(\\D|$)').test(ntext)) { tip = k; break; }
       }
     }
@@ -93,25 +112,15 @@
     }
 
     if (!mkn) {
-      const lines = ntext.split(/\r?\n/);
-      for (const line of lines) {
-        if (/\b(ST|ŠT|STEV|STEVI|NO|NR)\b/.test(line)) {
-          const ds = digits(line);
-          const mm = ds.match(/\d{8}/);
-          if (mm) { mkn = mm[0]; break; }
-        }
-      }
-    }
-    if (!mkn) {
       const c8 = [...ntext.matchAll(/(?<!\d)(\d{8})(?!\d)/g)].map(m => m[1]);
       mkn = c8.find(x => !/^20\d{6}$/.test(x)) || '';
     }
 
-    return {mkn, tip, year, maker, pairFound};
+    return {mkn, tip, year, maker, pairFound, candidates};
   }
 
   function score(d) {
-    return (d.mkn?8:0) + (d.tip?7:0) + (d.year?4:0) + (d.maker?2:0) + (d.pairFound?6:0);
+    return (d.mkn?8:0) + (d.tip?7:0) + (d.year?4:0) + (d.maker?2:0) + (d.pairFound?7:0);
   }
   function complete(d) { return !!(d.mkn && d.tip && d.year && d.maker); }
   function coreComplete(d) { return !!(d.mkn && d.tip && d.year); }
@@ -161,20 +170,31 @@
     return c;
   }
 
-  function makeCropCanvas(img, xPct, yPct, wPct, hPct, maxSide=1650, contrast=true) {
+  function cropCanvas(img, xPct, yPct, wPct, hPct, maxSide=1450, contrast=true) {
     const iw = img.width || img.naturalWidth, ih = img.height || img.naturalHeight;
-    const sx = Math.max(0, Math.round(iw * xPct));
-    const sy = Math.max(0, Math.round(ih * yPct));
-    const sw = Math.max(1, Math.min(iw - sx, Math.round(iw * wPct)));
-    const sh = Math.max(1, Math.min(ih - sy, Math.round(ih * hPct)));
-    const scale = Math.min(3, maxSide / Math.max(sw, sh));
-    const cw = Math.max(1, Math.round(sw * scale));
-    const ch = Math.max(1, Math.round(sh * scale));
-    const c = document.createElement('canvas'); c.width = cw; c.height = ch;
-    const ctx = c.getContext('2d', {alpha:false});
-    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,cw,ch);
-    if (contrast && 'filter' in ctx) ctx.filter = 'grayscale(1) contrast(1.75) brightness(1.08)';
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
+    const sx = Math.max(0, Math.round(iw*xPct));
+    const sy = Math.max(0, Math.round(ih*yPct));
+    const sw = Math.max(1, Math.min(iw-sx, Math.round(iw*wPct)));
+    const sh = Math.max(1, Math.min(ih-sy, Math.round(ih*hPct)));
+    const scale = Math.min(3, maxSide/Math.max(sw,sh));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1,Math.round(sw*scale));
+    c.height = Math.max(1,Math.round(sh*scale));
+    const ctx = c.getContext('2d',{alpha:false});
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height);
+    if (contrast && 'filter' in ctx) ctx.filter='grayscale(1) contrast(1.7) brightness(1.08)';
+    ctx.drawImage(img,sx,sy,sw,sh,0,0,c.width,c.height);
+    return c;
+  }
+
+  function rotateExisting(src, angle) {
+    const a = angle*Math.PI/180;
+    const cw = Math.ceil(Math.abs(src.width*Math.cos(a))+Math.abs(src.height*Math.sin(a)));
+    const ch = Math.ceil(Math.abs(src.width*Math.sin(a))+Math.abs(src.height*Math.cos(a)));
+    const c = document.createElement('canvas'); c.width=cw; c.height=ch;
+    const ctx = c.getContext('2d',{alpha:false});
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,cw,ch);
+    ctx.translate(cw/2,ch/2); ctx.rotate(a); ctx.drawImage(src,-src.width/2,-src.height/2);
     return c;
   }
 
@@ -191,7 +211,7 @@
       const found = await det.detect(canvas);
       for (const b of found) {
         const d = digits(b.rawValue);
-        if (d.length === 12 && validTip(d.slice(0,4))) return {tip:d.slice(0,4), mkn:d.slice(4)};
+        if (d.length === 12 && validTip(d.slice(0,4))) return {tip:d.slice(0,4),mkn:d.slice(4)};
       }
     } catch (_) {}
     return null;
@@ -201,16 +221,21 @@
     progressLabel = label;
     const ret = await w.recognize(canvas, {rotateAuto:true});
     const d = extract(ret.data?.text || '');
-    return {d, text:ret.data?.text || '', score:score(d)};
+    return {d,text:ret.data?.text || '',score:score(d)};
   }
 
-  function merge(a,b, preferPair=false) {
+  function merge(a,b,preferPair=false) {
     const out = {...a};
     if (preferPair && b.pairFound && b.mkn && b.tip) {
-      out.mkn = b.mkn; out.tip = b.tip; out.pairFound = true;
+      // par s kontekstom števca sme zamenjati slabši/generični par
+      const bc = b.candidates?.[0];
+      const ac = a.candidates?.[0];
+      if (!out.pairFound || !ac || !bc || bc.score >= ac.score) {
+        out.mkn=b.mkn; out.tip=b.tip; out.pairFound=true; out.candidates=b.candidates;
+      }
     }
-    for (const k of ['mkn','tip','year','maker']) if (!out[k] && b[k]) out[k] = b[k];
-    out.pairFound = !!(out.pairFound || b.pairFound);
+    for (const k of ['mkn','tip','year','maker']) if (!out[k] && b[k]) out[k]=b[k];
+    out.pairFound=!!(out.pairFound||b.pairFound);
     return out;
   }
 
@@ -219,68 +244,73 @@
     if (!file) { alert('Najprej slikaj ali izberi fotografijo števca.'); return; }
     if (typeof Tesseract === 'undefined') { alert('OCR knjižnica se ni naložila. Preveri internetno povezavo.'); return; }
 
-    btn.disabled = true;
-    if (el('ocrStatus')) el('ocrStatus').textContent = '⚡ Hitro berem števec…';
+    btn.disabled=true;
+    if (el('ocrStatus')) el('ocrStatus').textContent='⚡ Hitro berem števec…';
     let img;
     try {
-      img = await loadImage(file);
-      const fastCanvas = makeCanvas(img, 0, 1050, false);
-      const barcode = await detectBarcode(fastCanvas);
-      let best = {mkn:barcode?.mkn || '', tip:barcode?.tip || '', year:'', maker:'', pairFound:!!barcode};
-      const logs = barcode ? [`Črtna koda: ${barcode.tip} ${barcode.mkn}`] : [];
+      img=await loadImage(file);
+      const fast=makeCanvas(img,0,1100,false);
+      const barcode=await detectBarcode(fast);
+      let best={mkn:barcode?.mkn||'',tip:barcode?.tip||'',year:'',maker:'',pairFound:!!barcode,candidates:[]};
+      const logs=barcode?[`Črtna koda: ${barcode.tip} ${barcode.mkn}`]:[];
+      const w=await getWorker();
 
-      const w = await getWorker();
-      const first = await runOcr(w, fastCanvas, 'Hitro branje');
-      best = merge(best, first.d, true);
-      logs.push(first.text);
+      const first=await runOcr(w,fast,'Hitro branje');
+      best=merge(best,first.d,true); logs.push(first.text);
 
-      // Poseben hiter povečani izrez: pri E450 in podobnih števcih so MKN/TIP/leto pogosto majhni na sredini nalepke.
+      // 1) Horizontalna območja nalepk: Landis E450/E350, stari Landis in ISKRA 1631.
       if (!coreComplete(best) || !best.pairFound) {
-        const crop = makeCropCanvas(img, 0.08, 0.18, 0.84, 0.58, 1750, true);
-        const focused = await runOcr(w, crop, 'Povečujem nalepko');
-        best = merge(best, focused.d, true);
-        logs.push(focused.text);
+        const mid=cropCanvas(img,0.04,0.18,0.92,0.50,1500,true);
+        const r=await runOcr(w,mid,'Povečujem nalepko');
+        best=merge(best,r.d,true); logs.push(r.text);
       }
 
-      if (!complete(best)) {
-        const second = await runOcr(w, makeCanvas(img, 0, 1350, true), 'Dodatna kontrola');
-        best = merge(best, second.d, true);
-        logs.push(second.text);
-      }
-
-      if (!coreComplete(best)) {
-        for (const a of [90,-90,180]) {
-          const r = await runOcr(w, makeCanvas(img, a, 1200, true), `Rezervno branje ${a}°`);
-          best = merge(best, r.d, true);
-          logs.push(r.text);
-          if (coreComplete(best)) break;
+      // 2) ISKRA AM550 ima TIP+MKN pogosto natisnjen navpično ob levem robu.
+      if ((!best.mkn || !best.tip) && (best.maker==='ISKRA' || /AM550|ISKRA/i.test(logs.join(' ')))) {
+        const side=cropCanvas(img,0.00,0.22,0.38,0.58,1300,true);
+        let r=await runOcr(w,rotateExisting(side,90),'Berem navpično oznako');
+        best=merge(best,r.d,true); logs.push(r.text);
+        if (!best.mkn || !best.tip) {
+          r=await runOcr(w,rotateExisting(side,-90),'Navpična oznaka - druga smer');
+          best=merge(best,r.d,true); logs.push(r.text);
         }
       }
 
-      if (el('ocrBox')) el('ocrBox').textContent = logs.filter(Boolean).join('\n\n---\n\n') || '(ni prepoznanega besedila)';
-      if (el('mkn')) el('mkn').value = best.mkn || '';
-      if (el('tip')) el('tip').value = best.tip || '';
-      if (el('year')) el('year').value = best.year || '';
-      if (el('maker')) el('maker').value = best.maker || '';
-      if (typeof validateFields === 'function') validateFields();
+      // 3) Če je fotografija obrnjena ali zelo poševna, samo en rezervni celotni obrat.
+      if (!coreComplete(best)) {
+        const r=await runOcr(w,makeCanvas(img,90,1200,true),'Rezervno branje 90°');
+        best=merge(best,r.d,true); logs.push(r.text);
+      }
+
+      // 4) Zadnja kontrola samo, če manjka leto/proizvajalec.
+      if (!complete(best)) {
+        const r=await runOcr(w,makeCanvas(img,0,1350,true),'Dodatna kontrola');
+        best=merge(best,r.d,true); logs.push(r.text);
+      }
+
+      if (el('ocrBox')) el('ocrBox').textContent=logs.filter(Boolean).join('\n\n---\n\n')||'(ni prepoznanega besedila)';
+      if (el('mkn')) el('mkn').value=best.mkn||'';
+      if (el('tip')) el('tip').value=best.tip||'';
+      if (el('year')) el('year').value=best.year||'';
+      if (el('maker')) el('maker').value=best.maker||'';
+      if (typeof validateFields==='function') validateFields();
 
       if (el('ocrStatus')) {
-        el('ocrStatus').textContent = coreComplete(best)
+        el('ocrStatus').textContent=coreComplete(best)
           ? '✅ Prebrano. Preveri podatke in shrani.'
           : '⚠️ Nekaj ni bilo zanesljivo prebrano. Poskusi slikati malo bližje.';
       }
-    } catch (err) {
+    } catch(err) {
       console.error(err);
-      if (el('ocrStatus')) el('ocrStatus').textContent = 'Napaka pri OCR: ' + (err?.message || 'neznana napaka');
+      if (el('ocrStatus')) el('ocrStatus').textContent='Napaka pri OCR: '+(err?.message||'neznana napaka');
     } finally {
-      try { if (img && typeof img.close === 'function') img.close(); } catch (_) {}
-      btn.disabled = false;
+      try { if (img && typeof img.close==='function') img.close(); } catch(_) {}
+      btn.disabled=false;
     }
   };
 
-  if (el('ocrStatus')) el('ocrStatus').textContent = 'Po slikanju se podatki preberejo samodejno.';
-
-  window.addEventListener('pagehide', () => {
-    if (worker) { const w = worker; worker = null; try { w.terminate(); } catch (_) {} }
+  if (el('ocrStatus')) el('ocrStatus').textContent='Po slikanju se podatki preberejo samodejno.';
+  window.addEventListener('pagehide',()=>{
+    if (worker) { const w=worker; worker=null; try { w.terminate(); } catch(_){} }
   });
 })();

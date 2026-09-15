@@ -1,5 +1,5 @@
-const CACHE = "branje-stevcev-v12";
-const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./ocr-robust.js", "./auto-read.js", "./meter-recheck.js", "./email-share.js", "./gallery.js"];
+const CACHE = "branje-stevcev-v13";
+const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./ocr-robust.js", "./auto-read.js", "./meter-recheck.js", "./email-share.js", "./gallery.js", "./table-fix.js"];
 
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(APP_SHELL)));
@@ -28,6 +28,9 @@ async function injectScripts(response) {
   }
   if (!injected.includes("gallery.js")) {
     injected = injected.replace("</body>", '<script src="./gallery.js?v=1"></script></body>');
+  }
+  if (!injected.includes("table-fix.js")) {
+    injected = injected.replace("</body>", '<script src="./table-fix.js?v=1"></script></body>');
   }
   const headers = new Headers(response.headers);
   headers.delete("content-length");

@@ -1,4 +1,4 @@
-const CACHE = "branje-stevcev-v11";
+const CACHE = "branje-stevcev-v12";
 const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./ocr-robust.js", "./auto-read.js", "./meter-recheck.js", "./email-share.js", "./gallery.js"];
 
 self.addEventListener("install", event => {
@@ -21,7 +21,7 @@ async function injectScripts(response) {
     injected = injected.replace("</body>", '<script src="./auto-read.js?v=1"></script></body>');
   }
   if (!injected.includes("meter-recheck.js")) {
-    injected = injected.replace("</body>", '<script src="./meter-recheck.js?v=1"></script></body>');
+    injected = injected.replace("</body>", '<script src="./meter-recheck.js?v=2"></script></body>');
   }
   if (!injected.includes("email-share.js")) {
     injected = injected.replace("</body>", '<script src="./email-share.js?v=1"></script></body>');

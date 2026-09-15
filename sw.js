@@ -1,4 +1,4 @@
-const CACHE = "branje-stevcev-v14";
+const CACHE = "branje-stevcev-v15";
 const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./ocr-robust.js", "./barcode-first.js", "./auto-read.js", "./meter-recheck.js", "./email-share.js", "./gallery.js", "./table-fix.js"];
 
 self.addEventListener("install", event => {
@@ -15,14 +15,14 @@ async function injectScripts(response) {
   const text = await response.text();
   let injected = text;
 
-  if (!injected.includes("unpkg.com/@zxing/browser")) {
-    injected = injected.replace("</body>", '<script src="https://unpkg.com/@zxing/browser@latest"></script></body>');
+  if (!injected.includes("@zxing/library@0.23.0")) {
+    injected = injected.replace("</body>", '<script src="https://unpkg.com/@zxing/library@0.23.0/umd/index.min.js"></script></body>');
   }
   if (!injected.includes("ocr-robust.js")) {
     injected = injected.replace("</body>", '<script src="./ocr-robust.js?v=13"></script></body>');
   }
   if (!injected.includes("barcode-first.js")) {
-    injected = injected.replace("</body>", '<script src="./barcode-first.js?v=1"></script></body>');
+    injected = injected.replace("</body>", '<script src="./barcode-first.js?v=2"></script></body>');
   }
   if (!injected.includes("auto-read.js")) {
     injected = injected.replace("</body>", '<script src="./auto-read.js?v=2"></script></body>');

@@ -1,5 +1,5 @@
-const CACHE = "branje-stevcev-v13";
-const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./ocr-robust.js", "./auto-read.js", "./meter-recheck.js", "./email-share.js", "./gallery.js", "./table-fix.js"];
+const CACHE = "branje-stevcev-v14";
+const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./ocr-robust.js", "./auto-read.js", "./email-share.js", "./gallery.js", "./table-fix.js"];
 
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(APP_SHELL)));
@@ -15,13 +15,10 @@ async function injectScripts(response) {
   const text = await response.text();
   let injected = text;
   if (!injected.includes("ocr-robust.js")) {
-    injected = injected.replace("</body>", '<script src="./ocr-robust.js?v=10"></script></body>');
+    injected = injected.replace("</body>", '<script src="./ocr-robust.js?v=14"></script></body>');
   }
   if (!injected.includes("auto-read.js")) {
     injected = injected.replace("</body>", '<script src="./auto-read.js?v=1"></script></body>');
-  }
-  if (!injected.includes("meter-recheck.js")) {
-    injected = injected.replace("</body>", '<script src="./meter-recheck.js?v=2"></script></body>');
   }
   if (!injected.includes("email-share.js")) {
     injected = injected.replace("</body>", '<script src="./email-share.js?v=1"></script></body>');

@@ -14,16 +14,18 @@
     }
 
     const d = text.replace(/\D/g, '');
-    // Na naših števcih CODE128 praviloma vsebuje TIP(4) + MKN(8).
-    if (d.length === 12) {
-      const tip = d.slice(0,4), mkn = d.slice(4);
+
+    // Najpogostejši zapis na naših števcih: TIP(4) + MKN(8).
+    for (let i = 0; i <= d.length - 12; i++) {
+      const tip = d.slice(i, i + 4);
+      const mkn = d.slice(i + 4, i + 12);
       const n = Number(tip);
-      if (n >= 1400 && n <= 1799 && !/^0{8}$/.test(mkn)) {
+      if (n >= 1400 && n <= 1799 && /^\d{8}$/.test(mkn) && !/^0{8}$/.test(mkn)) {
         return { tip, mkn, year:'', maker:'', raw:text, kind:'BARCODE' };
       }
     }
 
-    // Nekateri dodatni I25 vsebujejo samo MKN; uporabimo ga le kot pomoč, ne kot končni TIP+MKN.
+    // Nekatere kode lahko vsebujejo samo MKN.
     if (d.length === 8 && !/^0{8}$/.test(d)) {
       return { tip:'', mkn:d, year:'', maker:'', raw:text, kind:'MKN_ONLY' };
     }
@@ -49,7 +51,7 @@
     const sx = Math.max(0, Math.round(iw*x)), sy = Math.max(0, Math.round(ih*y));
     const sw = Math.max(1, Math.min(iw-sx, Math.round(iw*w)));
     const sh = Math.max(1, Math.min(ih-sy, Math.round(ih*h)));
-    const scale = Math.min(1.8, maxSide / Math.max(sw, sh));
+    const scale = Math.min(2.2, maxSide / Math.max(sw, sh));
     const dw = Math.max(1, Math.round(sw*scale)), dh = Math.max(1, Math.round(sh*scale));
     const rot = ((rotate % 360) + 360) % 360;
     const c = document.createElement('canvas');
@@ -79,7 +81,7 @@
       const found = await detector.detect(canvas);
       for (const b of found) {
         const p = parseValue(b.rawValue || '');
-        if (p?.tip && p?.mkn) return p;
+        if (p?.tip || p?.mkn) return p;
       }
     } catch (_) {}
     return null;
@@ -87,9 +89,9 @@
 
   let zxingReader = null;
   async function zxingDecode(canvas) {
-    if (!window.ZXingBrowser?.BrowserMultiFormatReader) return null;
+    if (!window.ZXing?.BrowserMultiFormatReader) return null;
     try {
-      zxingReader ||= new ZXingBrowser.BrowserMultiFormatReader();
+      zxingReader ||= new ZXing.BrowserMultiFormatReader();
       const result = await zxingReader.decodeFromCanvas(canvas);
       const raw = typeof result?.getText === 'function' ? result.getText() : (result?.text || String(result || ''));
       return parseValue(raw);
@@ -105,14 +107,15 @@
     try {
       img = await loadBitmap(file);
 
-      // Vrstni red je namenoma prostorski: glavni števec ima prednost pred PLC/Flex modulom spodaj.
+      // Glavni števec ima prednost pred PLC/Flex modulom spodaj.
       const regions = [
-        [0.00,0.00,1.00,0.52,0],   // zgornja polovica - glavni števec
-        [0.00,0.18,0.52,0.62,0],   // levi del - navpične ISKRA kode / QR
-        [0.48,0.18,0.52,0.62,0],   // desni del
-        [0.00,0.00,1.00,0.72,90],  // navpične kode
+        [0.00,0.00,1.00,0.58,0],
+        [0.00,0.00,1.00,0.72,0],
+        [0.00,0.12,0.55,0.64,0],
+        [0.45,0.12,0.55,0.64,0],
+        [0.00,0.00,1.00,0.72,90],
         [0.00,0.00,1.00,0.72,270],
-        [0.00,0.00,1.00,0.72,0]    // širši rezervni izrez
+        [0.00,0.00,1.00,1.00,0]
       ];
 
       let mknOnly = null;
@@ -137,4 +140,56 @@
   }
 
   window.scanMeterBarcode = scanMeterBarcode;
+
+  // Ovij glavni OCR: najprej črtna koda, nato OCR samo dopolni leto/proizvajalca.
+  function setupBarcodeFirst() {
+    const btn = $('readBtn');
+    if (!btn || btn.dataset.barcodeFirst === '1') return;
+    const original = btn.onclick;
+    if (typeof original !== 'function') { setTimeout(setupBarcodeFirst, 100); return; }
+
+    btn.dataset.barcodeFirst = '1';
+    btn.onclick = async function(ev) {
+      const file = $('photo')?.files?.[0];
+      const status = $('ocrStatus');
+      let barcode = null;
+
+      if (file) {
+        if (status) status.textContent = '▥ Berem črtno kodo…';
+        barcode = await scanMeterBarcode(file);
+        if (barcode) {
+          if (barcode.tip && $('tip')) $('tip').value = barcode.tip;
+          if (barcode.mkn && $('mkn')) $('mkn').value = barcode.mkn;
+          if (barcode.year && $('year')) $('year').value = barcode.year;
+          if (barcode.maker && $('maker')) $('maker').value = barcode.maker;
+          if (typeof validateFields === 'function') validateFields();
+        }
+      }
+
+      await original.call(this, ev);
+
+      // Koda je za TIP/MKN avtoritativna: OCR ju ne sme prepisati.
+      if (barcode) {
+        if (barcode.tip && $('tip')) $('tip').value = barcode.tip;
+        if (barcode.mkn && $('mkn')) $('mkn').value = barcode.mkn;
+        if (barcode.year && $('year') && !$('year').value) $('year').value = barcode.year;
+        if (barcode.maker && $('maker') && !$('maker').value) $('maker').value = barcode.maker;
+        if (typeof validateFields === 'function') validateFields();
+
+        if (status) {
+          const year = $('year')?.value || '';
+          const maker = $('maker')?.value || '';
+          status.textContent = year && maker
+            ? '✅ Črtna koda + OCR: podatki prebrani. Preveri in shrani.'
+            : '✅ TIP/MKN iz črtne kode. Preverjam še leto/proizvajalca.';
+        }
+      }
+    };
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(setupBarcodeFirst, 80), {once:true});
+  } else {
+    setTimeout(setupBarcodeFirst, 80);
+  }
 })();

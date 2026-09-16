@@ -1,4 +1,4 @@
-const CACHE = "branje-stevcev-v19";
+const CACHE = "branje-stevcev-v20";
 const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./live-scanner.js", "./email-share.js", "./gallery.js", "./table-fix.js"];
 
 self.addEventListener("install", event => {
@@ -18,8 +18,11 @@ async function injectScripts(response) {
   if (!injected.includes("@zxing/browser@0.2.1")) {
     injected = injected.replace("</body>", '<script src="https://unpkg.com/@zxing/browser@0.2.1"></script></body>');
   }
+  if (!injected.includes("@ericblade/quagga2@1.12.1")) {
+    injected = injected.replace("</body>", '<script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.12.1/dist/quagga.min.js"></script></body>');
+  }
   if (!injected.includes("live-scanner.js")) {
-    injected = injected.replace("</body>", '<script src="./live-scanner.js?v=3"></script></body>');
+    injected = injected.replace("</body>", '<script src="./live-scanner.js?v=4"></script></body>');
   }
   if (!injected.includes("email-share.js")) {
     injected = injected.replace("</body>", '<script src="./email-share.js?v=1"></script></body>');

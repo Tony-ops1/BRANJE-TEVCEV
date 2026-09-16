@@ -138,8 +138,6 @@
         lastRaw = raw;
         lastAt = now;
         applyResult(parsed);
-
-        // Ko je koda uspešno prebrana, kamero ustavimo, da naslednja koda ne prepiše podatkov.
         setTimeout(() => stopScanner('✅ Koda prebrana. Preveri podatke in shrani.'), 250);
       });
       starting = false;
@@ -149,12 +147,132 @@
     }
   }
 
+  async function loadBitmap(file) {
+    if (window.createImageBitmap) {
+      try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+      catch (_) { try { return await createImageBitmap(file); } catch (_) {} }
+    }
+    return await new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = e => { URL.revokeObjectURL(url); reject(e); };
+      img.src = url;
+    });
+  }
+
+  function cropCanvas(img, x, y, w, h, angle = 0, maxSide = 2200) {
+    const iw = img.width || img.naturalWidth;
+    const ih = img.height || img.naturalHeight;
+    const sx = Math.max(0, Math.round(iw * x));
+    const sy = Math.max(0, Math.round(ih * y));
+    const sw = Math.max(1, Math.min(iw - sx, Math.round(iw * w)));
+    const sh = Math.max(1, Math.min(ih - sy, Math.round(ih * h)));
+    const scale = Math.min(2.4, maxSide / Math.max(sw, sh));
+    const bw = Math.max(1, Math.round(sw * scale));
+    const bh = Math.max(1, Math.round(sh * scale));
+    const rad = angle * Math.PI / 180;
+    const cw = Math.ceil(Math.abs(bw * Math.cos(rad)) + Math.abs(bh * Math.sin(rad)));
+    const ch = Math.ceil(Math.abs(bw * Math.sin(rad)) + Math.abs(bh * Math.cos(rad)));
+    const canvas = document.createElement('canvas');
+    canvas.width = cw;
+    canvas.height = ch;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.translate(cw / 2, ch / 2);
+    ctx.rotate(rad);
+    ctx.drawImage(img, sx, sy, sw, sh, -bw / 2, -bh / 2, bw, bh);
+    return canvas;
+  }
+
+  async function decodeCanvas(canvas) {
+    if ('BarcodeDetector' in window) {
+      try {
+        let formats = ['code_128', 'code_39', 'itf', 'qr_code', 'data_matrix', 'ean_13', 'ean_8'];
+        if (BarcodeDetector.getSupportedFormats) {
+          const supported = await BarcodeDetector.getSupportedFormats();
+          formats = formats.filter(f => supported.includes(f));
+        }
+        if (formats.length) {
+          const detector = new BarcodeDetector({ formats });
+          const found = await detector.detect(canvas);
+          for (const item of found) {
+            const parsed = parseCode(item.rawValue || '');
+            if (parsed) return parsed;
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (!window.ZXingBrowser?.BrowserMultiFormatReader) return null;
+    try {
+      reader ||= new ZXingBrowser.BrowserMultiFormatReader();
+      const result = await reader.decodeFromCanvas(canvas);
+      const raw = typeof result?.getText === 'function' ? result.getText() : (result?.text || String(result || ''));
+      return parseCode(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function scanImageFile(file) {
+    let img;
+    try {
+      img = await loadBitmap(file);
+      const regions = [
+        [0.00, 0.00, 1.00, 1.00, 0],
+        [0.00, 0.00, 1.00, 0.72, 0],
+        [0.00, 0.10, 0.58, 0.72, 0],
+        [0.42, 0.10, 0.58, 0.72, 0],
+        [0.00, 0.00, 1.00, 1.00, 90],
+        [0.00, 0.00, 1.00, 1.00, 270],
+        [0.00, 0.00, 1.00, 1.00, 180]
+      ];
+      for (const r of regions) {
+        const result = await decodeCanvas(cropCanvas(img, ...r));
+        if (result) return result;
+      }
+      return null;
+    } finally {
+      try { if (img && typeof img.close === 'function') img.close(); } catch (_) {}
+    }
+  }
+
+  async function readBarcodeFromGallery(file) {
+    if (!file) return null;
+    stopScanner();
+    ['mkn', 'tip', 'year', 'maker'].forEach(id => {
+      const input = $(id);
+      if (input) input.value = '';
+    });
+    if (typeof validateFields === 'function') validateFields();
+    const status = $('ocrStatus');
+    if (status) status.textContent = '🖼️ Berem črtno/QR kodo iz slike…';
+
+    try {
+      const result = await scanImageFile(file);
+      if (result) {
+        applyResult(result);
+        if (status) status.textContent = result.tip && result.mkn
+          ? `✅ KODA IZ SLIKE PREBRANA: ${result.tip} / ${result.mkn}` + (result.year ? ` / ${result.year}` : '')
+          : `✅ KODA IZ SLIKE PREBRANA: MKN ${result.mkn}`;
+        return result;
+      }
+      if (status) status.textContent = '⚠️ Na izbrani sliki črtne/QR kode nisem uspel prebrati. Izberi ostrejšo ali bližjo sliko kode.';
+      return null;
+    } catch (e) {
+      console.warn('Gallery barcode:', e);
+      if (status) status.textContent = '⚠️ Branje kode iz slike ni uspelo. Poskusi z drugo sliko.';
+      return null;
+    }
+  }
+
   function buildUi() {
     const photo = $('photo');
     const card = photo?.closest('section.card');
     if (!card || document.getElementById('liveScannerWrap')) return;
 
-    // Stari način fotografiranja/OCR skrijemo. V živo beremo samo črtno/QR kodo.
     ['photo','preview','readBtn','clearPhotoBtn'].forEach(id => {
       const e = $(id); if (e) e.style.display = 'none';
     });
@@ -193,18 +311,18 @@
     document.getElementById('startCameraBtn')?.addEventListener('click', startScanner);
     document.getElementById('stopCameraBtn')?.addEventListener('click', () => stopScanner('Kamera je ustavljena.'));
 
-    // Naslednji števec: po čiščenju polj se kamera spet sama vključi.
     $('newBtn')?.addEventListener('click', () => {
       lastRaw = '';
       lastAt = 0;
       setTimeout(startScanner, 350);
     });
 
-    if ($('ocrStatus')) $('ocrStatus').textContent = 'Kamera bere črtno ali QR kodo samodejno. Ni treba fotografirati.';
-
-    // Poskus samodejnega zagona. Če iPhone zahteva dotik, ostane gumb Vklopi kamero.
+    if ($('ocrStatus')) $('ocrStatus').textContent = 'Kamera bere črtno ali QR kodo samodejno. Lahko tudi izbereš sliko iz galerije.';
     setTimeout(startScanner, 450);
   }
+
+  window.readBarcodeFromGallery = readBarcodeFromGallery;
+  window.scanMeterBarcode = scanImageFile;
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', buildUi, {once:true});
   else buildUi();

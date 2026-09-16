@@ -14,7 +14,7 @@
     btn.type = 'button';
     btn.id = 'galleryBtn';
     btn.className = 'secondary';
-    btn.textContent = '🖼️ Izberi iz galerije';
+    btn.textContent = '🖼️ Izberi sliko iz galerije';
 
     const card = photo.closest('.card');
     const row = card ? card.querySelector('.btnrow') : null;
@@ -26,10 +26,17 @@
       gallery.click();
     });
 
-    gallery.addEventListener('change', () => {
+    gallery.addEventListener('change', async () => {
       const file = gallery.files && gallery.files[0];
       if (!file) return;
 
+      const status = document.getElementById('ocrStatus');
+      if (typeof window.readBarcodeFromGallery === 'function') {
+        await window.readBarcodeFromGallery(file);
+        return;
+      }
+
+      // Rezervni način za starejšo različico aplikacije.
       try {
         const dt = new DataTransfer();
         dt.items.add(file);
@@ -37,9 +44,7 @@
         photo.dispatchEvent(new Event('change', { bubbles: true }));
       } catch (err) {
         console.error(err);
-        const status = document.getElementById('ocrStatus');
         if (status) status.textContent = 'Izbira iz galerije v tem brskalniku ni uspela. Poskusi odpreti aplikacijo v Safari/Chrome.';
-        alert('Galerije ni bilo mogoče predati OCR-ju. Odpri aplikacijo v Safari ali Chrome in poskusi znova.');
       }
     });
   }

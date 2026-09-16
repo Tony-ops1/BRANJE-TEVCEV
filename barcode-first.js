@@ -8,14 +8,14 @@
     // ISKRA AM550 QR primer: 1682;87699356;2022;...
     const parts = text.split(';').map(x => x.trim());
     if (parts.length >= 3 && /^\d{4}$/.test(parts[0]) && /^\d{8}$/.test(parts[1])) {
-      const year = /^20\d{2}$/.test(parts[2]) ? parts[2] : '';
+      const year = /^(?:19|20)\d{2}$/.test(parts[2]) ? parts[2] : '';
       const maker = /AM550|ISKRA/i.test(text) ? 'ISKRA' : '';
       return { tip: parts[0], mkn: parts[1], year, maker, raw: text, kind: 'QR' };
     }
 
     const d = text.replace(/\D/g, '');
 
-    // Najpogostejši zapis na naših števcih: TIP(4) + MKN(8).
+    // Najpogostejši zapis: TIP(4) + MKN(8). Dovolimo tudi dodatne številke pred/za zapisom.
     for (let i = 0; i <= d.length - 12; i++) {
       const tip = d.slice(i, i + 4);
       const mkn = d.slice(i + 4, i + 12);
@@ -25,7 +25,6 @@
       }
     }
 
-    // Nekatere kode lahko vsebujejo samo MKN.
     if (d.length === 8 && !/^0{8}$/.test(d)) {
       return { tip:'', mkn:d, year:'', maker:'', raw:text, kind:'MKN_ONLY' };
     }
@@ -46,12 +45,12 @@
     });
   }
 
-  function cropCanvas(img, x, y, w, h, rotate = 0, maxSide = 1500) {
+  function cropCanvas(img, x, y, w, h, rotate = 0, maxSide = 1700) {
     const iw = img.width || img.naturalWidth, ih = img.height || img.naturalHeight;
     const sx = Math.max(0, Math.round(iw*x)), sy = Math.max(0, Math.round(ih*y));
     const sw = Math.max(1, Math.min(iw-sx, Math.round(iw*w)));
     const sh = Math.max(1, Math.min(ih-sy, Math.round(ih*h)));
-    const scale = Math.min(2.2, maxSide / Math.max(sw, sh));
+    const scale = Math.min(2.5, maxSide / Math.max(sw, sh));
     const dw = Math.max(1, Math.round(sw*scale)), dh = Math.max(1, Math.round(sh*scale));
     const rot = ((rotate % 360) + 360) % 360;
     const c = document.createElement('canvas');
@@ -89,10 +88,11 @@
 
   let zxingReader = null;
   async function zxingDecode(canvas) {
-    if (!window.ZXing?.BrowserMultiFormatReader) return null;
+    // @zxing/browser UMD ustvari global ZXingBrowser; to deluje tudi na iOS Safari.
+    if (!window.ZXingBrowser?.BrowserMultiFormatReader) return null;
     try {
-      zxingReader ||= new ZXing.BrowserMultiFormatReader();
-      const result = await zxingReader.decodeFromCanvas(canvas);
+      zxingReader ||= new ZXingBrowser.BrowserMultiFormatReader();
+      const result = zxingReader.decodeFromCanvas(canvas);
       const raw = typeof result?.getText === 'function' ? result.getText() : (result?.text || String(result || ''));
       return parseValue(raw);
     } catch (_) { return null; }
@@ -106,15 +106,13 @@
     let img;
     try {
       img = await loadBitmap(file);
-
-      // Glavni števec ima prednost pred PLC/Flex modulom spodaj.
       const regions = [
         [0.00,0.00,1.00,0.58,0],
         [0.00,0.00,1.00,0.72,0],
-        [0.00,0.12,0.55,0.64,0],
-        [0.45,0.12,0.55,0.64,0],
-        [0.00,0.00,1.00,0.72,90],
-        [0.00,0.00,1.00,0.72,270],
+        [0.00,0.10,0.60,0.68,0],
+        [0.40,0.10,0.60,0.68,0],
+        [0.00,0.00,1.00,0.78,90],
+        [0.00,0.00,1.00,0.78,270],
         [0.00,0.00,1.00,1.00,0]
       ];
 
@@ -141,7 +139,6 @@
 
   window.scanMeterBarcode = scanMeterBarcode;
 
-  // Ovij glavni OCR: najprej črtna koda, nato OCR samo dopolni leto/proizvajalca.
   function setupBarcodeFirst() {
     const btn = $('readBtn');
     if (!btn || btn.dataset.barcodeFirst === '1') return;
@@ -152,44 +149,36 @@
     btn.onclick = async function(ev) {
       const file = $('photo')?.files?.[0];
       const status = $('ocrStatus');
-      let barcode = null;
+      let code = window.__meterBarcodeResult || null;
 
-      if (file) {
+      if (file && !(code?.tip && code?.mkn)) {
         if (status) status.textContent = '▥ Berem črtno kodo…';
-        barcode = await scanMeterBarcode(file);
-        if (barcode) {
-          if (barcode.tip && $('tip')) $('tip').value = barcode.tip;
-          if (barcode.mkn && $('mkn')) $('mkn').value = barcode.mkn;
-          if (barcode.year && $('year')) $('year').value = barcode.year;
-          if (barcode.maker && $('maker')) $('maker').value = barcode.maker;
-          if (typeof validateFields === 'function') validateFields();
-        }
+        code = await scanMeterBarcode(file);
+      }
+
+      if (code) {
+        if (code.tip && $('tip')) $('tip').value = code.tip;
+        if (code.mkn && $('mkn')) $('mkn').value = code.mkn;
+        if (code.year && $('year')) $('year').value = code.year;
+        if (code.maker && $('maker')) $('maker').value = code.maker;
+        if (typeof validateFields === 'function') validateFields();
       }
 
       await original.call(this, ev);
 
-      // Koda je za TIP/MKN avtoritativna: OCR ju ne sme prepisati.
-      if (barcode) {
-        if (barcode.tip && $('tip')) $('tip').value = barcode.tip;
-        if (barcode.mkn && $('mkn')) $('mkn').value = barcode.mkn;
-        if (barcode.year && $('year') && !$('year').value) $('year').value = barcode.year;
-        if (barcode.maker && $('maker') && !$('maker').value) $('maker').value = barcode.maker;
+      // Koda ima prednost pred OCR za TIP/MKN.
+      if (code) {
+        if (code.tip && $('tip')) $('tip').value = code.tip;
+        if (code.mkn && $('mkn')) $('mkn').value = code.mkn;
+        if (code.year && $('year') && !$('year').value) $('year').value = code.year;
+        if (code.maker && $('maker') && !$('maker').value) $('maker').value = code.maker;
         if (typeof validateFields === 'function') validateFields();
-
-        if (status) {
-          const year = $('year')?.value || '';
-          const maker = $('maker')?.value || '';
-          status.textContent = year && maker
-            ? '✅ Črtna koda + OCR: podatki prebrani. Preveri in shrani.'
-            : '✅ TIP/MKN iz črtne kode. Preverjam še leto/proizvajalca.';
-        }
+        if (status) status.textContent = `✅ Črtna koda prebrana${code.tip && code.mkn ? `: ${code.tip} / ${code.mkn}` : ''}. Preveri podatke in shrani.`;
       }
     };
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(setupBarcodeFirst, 80), {once:true});
-  } else {
-    setTimeout(setupBarcodeFirst, 80);
-  }
+    document.addEventListener('DOMContentLoaded', () => setTimeout(setupBarcodeFirst, 50), {once:true});
+  } else setTimeout(setupBarcodeFirst, 50);
 })();

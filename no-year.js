@@ -6,7 +6,8 @@
     catch (_) { return []; }
   }
 
-  function validateNoYear(){
+  // Leto ostane prikazano in se lahko shrani, vendar nikoli ne blokira shranjevanja.
+  function validateOptionalYear(){
     const mknEl = document.getElementById('mkn');
     const tipEl = document.getElementById('tip');
     const yearEl = document.getElementById('year');
@@ -17,8 +18,11 @@
     const tip = digits(tipEl.value).slice(0, 4);
     mknEl.value = mkn;
     tipEl.value = tip;
+
+    // Leto samo očistimo na največ 4 številke. Ni obvezen podatek.
     if (yearEl) {
-      yearEl.value = '';
+      yearEl.value = digits(yearEl.value).slice(0, 4);
+      yearEl.disabled = false;
       yearEl.classList.remove('invalid','warn');
     }
 
@@ -52,62 +56,36 @@
     return {ok:false, duplicate};
   }
 
-  function removeYearFromExports(){
-    try {
-      if (typeof window.exportRows === 'function' && !window.exportRows.__noYearWrapped) {
-        const original = window.exportRows;
-        const wrapped = function(){
-          const rows = original();
-          return Array.isArray(rows) ? rows.map(row => {
-            const out = {};
-            Object.entries(row || {}).forEach(([k,v]) => {
-              if (String(k).toLowerCase() !== 'leto') out[k] = v;
-            });
-            return out;
-          }) : rows;
-        };
-        wrapped.__noYearWrapped = true;
-        window.exportRows = wrapped;
-        try { exportRows = wrapped; } catch (_) {}
-      }
-    } catch (_) {}
-  }
-
   function setup(){
     const year = document.getElementById('year');
     if (year) {
-      year.value = '';
-      year.disabled = true;
+      year.disabled = false;
       const box = year.closest('div');
-      if (box) box.style.display = 'none';
+      if (box) box.style.display = '';
+      const help = box?.querySelector('.help');
+      if (help) help.textContent = 'Neobvezno – če ga ne prebere, lahko vrstico vseeno shraniš.';
     }
 
     const subtitle = document.querySelector('header small');
-    if (subtitle) subtitle.textContent = 'MKN · TIP MKN · proizvajalec';
+    if (subtitle) subtitle.textContent = 'MKN · TIP MKN · leto · proizvajalec';
 
+    // Če je prejšnja različica skrila stolpec Leto, ga ponovno pokaži.
     const style = document.createElement('style');
     style.textContent = `
-      #tbl th:nth-child(4), #tbl td:nth-child(4){display:none !important;}
+      #tbl th:nth-child(4), #tbl td:nth-child(4){display:table-cell !important;}
     `;
     document.head.appendChild(style);
 
     try {
-      window.validateFields = validateNoYear;
-      validateFields = validateNoYear;
+      window.validateFields = validateOptionalYear;
+      validateFields = validateOptionalYear;
     } catch (_) {}
 
-    ['mkn','tip','maker'].forEach(id => {
-      document.getElementById(id)?.addEventListener('input', () => setTimeout(validateNoYear, 0));
+    ['mkn','tip','year','maker'].forEach(id => {
+      document.getElementById(id)?.addEventListener('input', () => setTimeout(validateOptionalYear, 0));
     });
 
-    // Pred shranjevanjem vedno počisti leto, da se ne shrani niti, če ga QR vsebuje.
-    document.getElementById('saveBtn')?.addEventListener('click', () => {
-      if (year) year.value = '';
-    }, true);
-
-    removeYearFromExports();
-    setTimeout(removeYearFromExports, 300);
-    setTimeout(validateNoYear, 100);
+    setTimeout(validateOptionalYear, 100);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setup, {once:true});

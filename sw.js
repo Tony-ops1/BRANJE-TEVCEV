@@ -1,4 +1,4 @@
-const CACHE = "branje-stevcev-v21";
+const CACHE = "branje-stevcev-v22";
 const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./live-scanner.js", "./no-year.js", "./email-share.js", "./gallery.js", "./table-fix.js"];
 
 self.addEventListener("install", event => {
@@ -25,10 +25,10 @@ async function injectScripts(response) {
     injected = injected.replace("</body>", '<script src="./live-scanner.js?v=4"></script></body>');
   }
   if (!injected.includes("no-year.js")) {
-    injected = injected.replace("</body>", '<script src="./no-year.js?v=1"></script></body>');
+    injected = injected.replace("</body>", '<script src="./no-year.js?v=2"></script></body>');
   }
   if (!injected.includes("email-share.js")) {
-    injected = injected.replace("</body>", '<script src="./email-share.js?v=2"></script></body>');
+    injected = injected.replace("</body>", '<script src="./email-share.js?v=3"></script></body>');
   }
   if (!injected.includes("gallery.js")) {
     injected = injected.replace("</body>", '<script src="./gallery.js?v=2"></script></body>');

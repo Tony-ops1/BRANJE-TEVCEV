@@ -11,7 +11,7 @@
   function makeXlsxFile(rows){
     if (typeof XLSX === 'undefined') throw new Error('Excel knjižnica ni naložena.');
     const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [{wch:9},{wch:13},{wch:12},{wch:9},{wch:20},{wch:13},{wch:10}];
+    ws['!cols'] = [{wch:9},{wch:13},{wch:12},{wch:20},{wch:13},{wch:10}];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Števci');
     const bytes = XLSX.write(wb, {bookType:'xlsx', type:'array'});
@@ -21,7 +21,7 @@
   }
 
   function rowsToMailText(rows){
-    const lines = rows.slice(0,50).map(r => `${r['Zap. št.']}. MKN ${r['MKN']} | TIP ${r['TIP MKN']} | ${r['Leto']} | ${r['Proizvajalec']} | ${r['Datum']}`);
+    const lines = rows.slice(0,50).map(r => `${r['Zap. št.']}. MKN ${r['MKN']} | TIP ${r['TIP MKN']} | ${r['Proizvajalec']} | ${r['Datum']}`);
     let text = `Podatki iz aplikacije Branje števcev\n\n${lines.join('\n')}`;
     if (rows.length > 50) text += `\n\n... in še ${rows.length - 50} vrstic v Excel datoteki.`;
     return text;
@@ -50,8 +50,6 @@
       if (e && e.name === 'AbortError') return;
     }
 
-    // Nadomestna možnost za brskalnike brez deljenja datotek:
-    // Excel shrani lokalno, nato odpre osnutek e-pošte s podatki v besedilu.
     try {
       const url = URL.createObjectURL(file);
       const a = document.createElement('a');

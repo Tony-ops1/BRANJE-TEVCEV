@@ -340,36 +340,49 @@
     enhancedBusy = true;
 
     try {
-      // HITRI NAČIN: najprej originalna slika iz območja rumenega okvirja.
-      // Brez OCR, brez QR in brez težkih zaporednih filtrov.
-      const fastFrames = [
-        makeCanvas(video,0.08,0.30,0.84,0.38,'raw',1200,260),
-        makeCanvas(video,0.03,0.20,0.94,0.58,'raw',1400,0),
-        makeCanvas(video,0.08,0.30,0.84,0.38,'gray',1200,260)
-      ].filter(Boolean);
+      // Rumeni okvir je dejansko območje branja: 4%/31%/92%/34%.
+      // Najprej vedno dekodiramo originalno sliko brez filtrov.
+      const roi = makeCanvas(video,0.04,0.31,0.92,0.34,'raw',1500,360);
+      if (roi) {
+        let raw = await decodeCanvas(roi,false);
+        if (raw && acceptRaw(raw)) return;
 
-      for (const frame of fastFrames) {
-        const raw = await decodeCanvas(frame, false);
+        // Drugi hitri poskus: sivina z blagim kontrastom.
+        const gray = makeCanvas(video,0.04,0.31,0.92,0.34,'gray',1500,360);
+        raw = await decodeCanvas(gray,false);
         if (raw && acceptRaw(raw)) return;
       }
 
-      // Rezerva za slab kontrast/odsev: samo en kontrastni poskus + Quagga.
-      const fallback = makeCanvas(video,0.05,0.24,0.90,0.52,'contrast',1400,300);
-      if (fallback) {
-        let raw = await decodeCanvas(fallback, true);
-        if (raw && acceptRaw(raw)) return;
-
-        const bw = thresholdCanvas(fallback, 165);
-        raw = await decodeCanvas(bw, false);
+      // Širši pas pomaga, če koda malo uide iz rumenega okvirja.
+      const wide = makeCanvas(video,0.02,0.22,0.96,0.54,'raw',1500,0);
+      if (wide) {
+        let raw = await decodeCanvas(wide,false);
         if (raw && acceptRaw(raw)) return;
       }
 
-      // Navpična koda: en lahek kader v obeh smereh.
-      const rotatedBase = makeCanvas(video,0.08,0.20,0.84,0.60,'raw',1200,0);
-      if (rotatedBase) {
-        for (const angle of [90,270]) {
-          const raw = await decodeCanvas(rotateCanvas(rotatedBase,angle),false);
+      // Počasnejša rezerva samo občasno: Quagga + kontrast.
+      // enhancedFrameScan se kliče hitro, zato Quagge ne poganjamo vsak krog.
+      const now = Date.now();
+      if (!enhancedFrameScan.lastHeavy || now-enhancedFrameScan.lastHeavy > 900) {
+        enhancedFrameScan.lastHeavy=now;
+        const contrast = makeCanvas(video,0.04,0.27,0.92,0.44,'contrast',1500,360);
+        if (contrast) {
+          let raw = await decodeCanvas(contrast,true);
           if (raw && acceptRaw(raw)) return;
+
+          // Odsev lahko izbriše del črt; trije pragovi dajo različne robove.
+          for (const t of [145,175,205]) {
+            raw = await decodeCanvas(thresholdCanvas(contrast,t),false);
+            if (raw && acceptRaw(raw)) return;
+          }
+        }
+
+        // Navpična koda.
+        if (roi) {
+          for (const angle of [90,270]) {
+            const raw = await decodeCanvas(rotateCanvas(roi,angle),false);
+            if (raw && acceptRaw(raw)) return;
+          }
         }
       }
     } finally {
@@ -399,8 +412,8 @@
         audio:false,
         video:{
           facingMode:{ideal:'environment'},
-          width:{ideal:1920},
-          height:{ideal:1080},
+          width:{ideal:2560},
+          height:{ideal:1440},
           frameRate:{ideal:30}
         }
       };
@@ -416,7 +429,7 @@
       await tuneCamera(video);
 
       clearPolling();
-      pollTimer = setInterval(enhancedFrameScan, 180);
+      pollTimer = setInterval(enhancedFrameScan, 120);
     } catch (e) {
       console.warn('Live scanner:', e);
       stopScanner('⚠️ Kamera se ni odprla. Pritisni »Vklopi kamero« in dovoli dostop do kamere.');

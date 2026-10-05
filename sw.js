@@ -1,4 +1,4 @@
-const CACHE = "branje-stevcev-v27";
+const CACHE = "branje-stevcev-v28";
 const APP_SHELL = ["./elektro-bg.jpg", "./", "./index.html", "./manifest.webmanifest", "./live-scanner.js", "./no-year.js", "./email-share.js", "./gallery.js", "./table-fix.js"];
 
 self.addEventListener("install", event => {

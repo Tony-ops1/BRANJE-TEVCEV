@@ -54,16 +54,19 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style id="elektro-bg-theme">
 body{
-  background-image:linear-gradient(rgba(255,255,255,.72),rgba(255,255,255,.72)),url("./elektro-bg.jpg") !important;
-  background-size:cover !important;
-  background-position:center top !important;
-  background-repeat:no-repeat !important;
-  background-attachment:fixed !important;
+  background:#fff url("./elektro-bg.jpg") center top / cover no-repeat fixed !important;
+}
+main{
+  background:rgba(255,255,255,.18);
+}
+.card{
+  background:rgba(255,255,255,.90) !important;
+  backdrop-filter:blur(2px);
+  -webkit-backdrop-filter:blur(2px);
 }
 @media (max-width:700px){
   body{
-    background-size:auto 100vh !important;
-    background-position:center top !important;
+    background:#fff url("./elektro-bg.jpg") center 90px / 100% auto no-repeat fixed !important;
   }
 }
 </style>

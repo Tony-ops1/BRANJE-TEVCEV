@@ -1,4 +1,4 @@
-const CACHE = "branje-stevcev-v26";
+const CACHE = "branje-stevcev-v27";
 const APP_SHELL = ["./elektro-bg.jpg", "./", "./index.html", "./manifest.webmanifest", "./live-scanner.js", "./no-year.js", "./email-share.js", "./gallery.js", "./table-fix.js"];
 
 self.addEventListener("install", event => {
@@ -22,7 +22,7 @@ async function injectScripts(response) {
     injected = injected.replace("</body>", '<script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.12.1/dist/quagga.min.js"></script></body>');
   }
   if (!injected.includes("live-scanner.js")) {
-    injected = injected.replace("</body>", '<script src="./live-scanner.js?v=7"></script></body>');
+    injected = injected.replace("</body>", '<script src="./live-scanner.js?v=8"></script></body>');
   }
   if (!injected.includes("no-year.js")) {
     injected = injected.replace("</body>", '<script src="./no-year.js?v=2"></script></body>');

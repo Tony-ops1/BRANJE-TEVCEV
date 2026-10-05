@@ -1,5 +1,5 @@
-const CACHE = "branje-stevcev-v24";
-const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./live-scanner.js", "./no-year.js", "./email-share.js", "./gallery.js", "./table-fix.js"];
+const CACHE = "branje-stevcev-v25";
+const APP_SHELL = ["./elektro-bg.jpg", "./", "./index.html", "./manifest.webmanifest", "./live-scanner.js", "./no-year.js", "./email-share.js", "./gallery.js", "./table-fix.js"];
 
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(APP_SHELL)));

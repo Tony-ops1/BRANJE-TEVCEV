@@ -145,12 +145,16 @@
     const now = Date.now();
     if (!raw || (raw === lastRaw && now - lastAt < 2500)) return false;
     const parsed = parseCode(raw);
-    if (!parsed) return false;
+
+    // Samodejni čitalnik sprejme samo popolno kodo števca:
+    // 4-mestni TIP MKN + 8-mestni MKN.
+    // Tako se ne ustavi na drugih 8-mestnih številkah ali pomožnih kodah.
+    if (!parsed?.tip || !parsed?.mkn) return false;
 
     lastRaw = raw;
     lastAt = now;
     applyResult(parsed);
-    setTimeout(() => stopScanner('✅ Koda prebrana. Preveri podatke in shrani.'), 180);
+    setTimeout(() => stopScanner(`✅ ČRTNA KODA PREBRANA: ${parsed.tip} / ${parsed.mkn}`), 180);
     return true;
   }
 
@@ -257,7 +261,8 @@
   async function nativeDecode(canvas) {
     if (!canvas || !('BarcodeDetector' in window)) return null;
     try {
-      let formats = ['code_128','code_39','itf','codabar','qr_code','data_matrix','ean_13','ean_8','upc_a','upc_e'];
+      // Samo klasične črtne kode. QR/DataMatrix ne uporabljamo za samodejni zajem števca.
+      let formats = ['code_128','code_39','itf','codabar','ean_13','ean_8','upc_a','upc_e'];
       if (BarcodeDetector.getSupportedFormats) {
         const supported = await BarcodeDetector.getSupportedFormats();
         formats = formats.filter(f => supported.includes(f));
@@ -336,14 +341,14 @@
         }
       }
 
-      // Po ~1,5 s brez uspeha preberemo samo številčni napis neposredno pod kodo.
-      // To reši ravno primere, kjer odsev prekine nekaj črt Code128.
-      const now = Date.now();
-      if (now - scanStartedAt > 1500 && now - lastOcrAt > 2200 && !ocrBusy) {
-        lastOcrAt = now;
-        const numberBand = makeCanvas(video,0.08,0.42,0.84,0.22,'hard',1700,360);
-        const pair = await ocrPrintedPair(numberBand);
-        if (pair && acceptPair(pair)) return;
+      // Če je koda na števcu navpično ali je telefon zasukan,
+      // poskusimo isti kader še v obeh 90° smereh. Še vedno beremo samo črtno kodo.
+      const rotateBase = makeCanvas(video,0.03,0.20,0.94,0.60,'contrast',1500,0);
+      if (rotateBase) {
+        for (const angle of [90, 270]) {
+          const raw = await decodeCanvas(rotateCanvas(rotateBase, angle), true);
+          if (raw && acceptRaw(raw)) return;
+        }
       }
     } finally {
       enhancedBusy = false;
@@ -493,7 +498,7 @@
 
     ['photo','preview','readBtn','clearPhotoBtn'].forEach(id=>{const e=$(id);if(e)e.style.display='none';});
     const details=$('ocrBox')?.closest('section.card'); if(details) details.style.display='none';
-    const counter=card.querySelector('.counter'); if(counter) counter.textContent='1. Skeniraj črtno kodo / QR';
+    const counter=card.querySelector('.counter'); if(counter) counter.textContent='1. Skeniraj črtno kodo';
 
     const style=document.createElement('style');
     style.textContent=`
@@ -519,7 +524,7 @@
     $('stopCameraBtn')?.addEventListener('click',()=>stopScanner('Kamera je ustavljena.'));
     $('newBtn')?.addEventListener('click',()=>{lastRaw='';lastAt=0;setTimeout(startScanner,350);});
 
-    if($('ocrStatus')) $('ocrStatus').textContent='Kamera samodejno bere črtno ali QR kodo. Lahko tudi izbereš sliko iz galerije.';
+    if($('ocrStatus')) $('ocrStatus').textContent='Kamera samodejno bere črtno kodo števca (TIP MKN + MKN).';
     setTimeout(startScanner,450);
   }
 

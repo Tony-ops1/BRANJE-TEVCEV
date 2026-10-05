@@ -177,6 +177,7 @@
       const caps = track.getCapabilities?.() || {};
       const advanced = [];
       if (Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) advanced.push({focusMode:'continuous'});
+      if (Array.isArray(caps.exposureMode) && caps.exposureMode.includes('continuous')) advanced.push({exposureMode:'continuous'});
       // Pri bližnjih števcih digitalni zoom pogosto poslabša ostrino, zato ga ne vsiljujemo.
       if (advanced.length) await track.applyConstraints({advanced});
     } catch (_) {}
@@ -230,16 +231,34 @@
       const timer = setTimeout(() => finish(null), 1200);
       try {
         Quagga.decodeSingle({
-          src: canvas.toDataURL('image/jpeg', 0.95),
+          src: canvas.toDataURL('image/jpeg', 0.96),
           numOfWorkers: 0,
           locate: true,
           inputStream: {size: 0},
           locator: {halfSample:false, patchSize:'medium'},
-          decoder: {readers:['code_128_reader','code_39_reader','i2of5_reader','codabar_reader'], multiple:false}
+          decoder: {
+            readers:[
+              'code_128_reader','code_39_reader','code_93_reader',
+              'i2of5_reader','2of5_reader','codabar_reader',
+              'ean_reader','ean_8_reader','upc_reader','upc_e_reader'
+            ],
+            multiple:true
+          }
         }, result => {
           clearTimeout(timer);
-          const raw = result?.codeResult?.code || '';
-          finish(parseCode(raw) ? raw : null);
+
+          // Pri več črtnih kodah na istem števcu izberi samo tisto,
+          // ki dejansko vsebuje veljaven 4-mestni TIP + 8-mestni MKN.
+          const results = Array.isArray(result) ? result : (result ? [result] : []);
+          for (const item of results) {
+            const raw = item?.codeResult?.code || '';
+            const parsed = parseCode(raw);
+            if (parsed?.tip && parsed?.mkn) {
+              finish(raw);
+              return;
+            }
+          }
+          finish(null);
         });
       } catch (_) {
         clearTimeout(timer);
@@ -262,7 +281,7 @@
     if (!canvas || !('BarcodeDetector' in window)) return null;
     try {
       // Samo klasične črtne kode. QR/DataMatrix ne uporabljamo za samodejni zajem števca.
-      let formats = ['code_128','code_39','itf','codabar','ean_13','ean_8','upc_a','upc_e'];
+      let formats = ['code_128','code_39','code_93','itf','codabar','ean_13','ean_8','upc_a','upc_e'];
       if (BarcodeDetector.getSupportedFormats) {
         const supported = await BarcodeDetector.getSupportedFormats();
         formats = formats.filter(f => supported.includes(f));
@@ -321,32 +340,48 @@
     enhancedBusy = true;
 
     try {
-      // Celoten srednji pas + več vodoravnih rezov. Pri odsevu je pogosto vsaj en del črt še čist.
+      // Samo črtna koda. Skeniramo CELOTEN kader in nato še posamezne pasove.
+      // To je pomembno pri števcih, ki imajo majhno pomožno kodo zgoraj
+      // in glavno TIP+MKN črtno kodo čisto spodaj.
       const variants = [
-        makeCanvas(video,0.03,0.26,0.94,0.42,'raw',1500,0),
-        makeCanvas(video,0.03,0.26,0.94,0.42,'contrast',1500,0),
-        makeCanvas(video,0.04,0.31,0.92,0.18,'gray',1500,220),
-        makeCanvas(video,0.04,0.39,0.92,0.18,'gray',1500,220),
-        makeCanvas(video,0.04,0.47,0.92,0.18,'gray',1500,220)
+        makeCanvas(video,0.00,0.00,1.00,1.00,'raw',1600,0),
+        makeCanvas(video,0.00,0.00,1.00,1.00,'gray',1600,0),
+
+        makeCanvas(video,0.02,0.08,0.96,0.30,'raw',1600,260),
+        makeCanvas(video,0.02,0.28,0.96,0.30,'raw',1600,260),
+        makeCanvas(video,0.02,0.48,0.96,0.30,'raw',1600,260),
+        makeCanvas(video,0.02,0.66,0.96,0.32,'raw',1600,260),
+
+        makeCanvas(video,0.02,0.42,0.96,0.38,'contrast',1600,300),
+        makeCanvas(video,0.02,0.60,0.96,0.38,'contrast',1600,300)
       ].filter(Boolean);
 
-      // Prva dva poskusa uporabljata vse razpoložljive dekoderje.
-      for (let i=0;i<variants.length;i++) {
-        const raw = await decodeCanvas(variants[i], i < 3);
+      for (let i=0; i<variants.length; i++) {
+        // Quagga je počasnejši, zato ga uporabimo na celotnem kadru
+        // ter na spodnjih pasovih, kjer je pri naših števcih pogosto glavna koda.
+        const useQuagga = (i === 0 || i === 5 || i === 7);
+        const raw = await decodeCanvas(variants[i], useQuagga);
         if (raw && acceptRaw(raw)) return;
-        if (i === 1) {
-          const bw = thresholdCanvas(variants[i], 165);
-          const raw2 = await decodeCanvas(bw, true);
-          if (raw2 && acceptRaw(raw2)) return;
+
+        // Pri odsevu poskusimo več pragov. Še vedno se dekodira izključno črtna koda.
+        if (i === 4 || i === 5 || i === 7) {
+          for (const threshold of [135, 165, 195]) {
+            const bw = thresholdCanvas(variants[i], threshold);
+            const raw2 = await decodeCanvas(bw, threshold === 165);
+            if (raw2 && acceptRaw(raw2)) return;
+          }
         }
       }
 
-      // Če je koda na števcu navpično ali je telefon zasukan,
-      // poskusimo isti kader še v obeh 90° smereh. Še vedno beremo samo črtno kodo.
-      const rotateBase = makeCanvas(video,0.03,0.20,0.94,0.60,'contrast',1500,0);
-      if (rotateBase) {
+      // Navpična / zasukana črtna koda: oba 90° obrata.
+      const rotateBases = [
+        makeCanvas(video,0.00,0.00,1.00,1.00,'gray',1500,0),
+        makeCanvas(video,0.02,0.48,0.96,0.50,'contrast',1500,0)
+      ].filter(Boolean);
+
+      for (const base of rotateBases) {
         for (const angle of [90, 270]) {
-          const raw = await decodeCanvas(rotateCanvas(rotateBase, angle), true);
+          const raw = await decodeCanvas(rotateCanvas(base, angle), true);
           if (raw && acceptRaw(raw)) return;
         }
       }

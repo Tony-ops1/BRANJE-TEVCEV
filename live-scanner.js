@@ -207,6 +207,23 @@
     return c;
   }
 
+  function makeVisibleCanvas(video, x=0, y=0, w=1, h=1, mode='raw') {
+    const iw=video.videoWidth||0, ih=video.videoHeight||0;
+    const box=video.getBoundingClientRect();
+    if(!iw||!ih||!box.width||!box.height) return null;
+
+    // object-fit:cover: calculate which part of the camera frame is actually visible.
+    const scale=Math.max(box.width/iw, box.height/ih);
+    const visibleW=box.width/scale, visibleH=box.height/scale;
+    const offsetX=(iw-visibleW)/2, offsetY=(ih-visibleH)/2;
+
+    const sx=(offsetX + visibleW*x)/iw;
+    const sy=(offsetY + visibleH*y)/ih;
+    const sw=(visibleW*w)/iw;
+    const sh=(visibleH*h)/ih;
+    return makeCanvas(video,sx,sy,sw,sh,mode,0,0);
+  }
+
   function thresholdCanvas(source, threshold=165) {
     if (!source) return null;
     const c = document.createElement('canvas');
@@ -342,35 +359,27 @@
   }
 
   async function enhancedFrameScan() {
-    if (enhancedBusy || !controls) return;
+    if(enhancedBusy || !controls) return;
     const video=$('liveVideo');
     if(!video || video.readyState<2 || !video.videoWidth) return;
     enhancedBusy=true;
     try{
-      // Ozki pasovi čez rdeči okvir. Brez umetnega povečanja, da črte ostanejo ostre.
-      const strips=[
-        [0.02,0.34,0.96,0.13],
-        [0.02,0.38,0.96,0.13],
-        [0.02,0.42,0.96,0.13],
-        [0.02,0.46,0.96,0.13],
-        [0.02,0.31,0.96,0.22]
-      ];
-      for(const [x,y,w,h] of strips){
-        const frame=makeCanvas(video,x,y,w,h,'raw',0,0);
-        if(!frame) continue;
-        let raw=await decodeCanvas(frame,false);
+      // Rdeči okvir na zaslonu -> isti del dejanskega video kadra.
+      // Prej object-fit:cover ni bil upoštevan, zato je dekoder pogosto bral drug del slike.
+      const roi=makeVisibleCanvas(video,0.035,0.29,0.93,0.38,'raw');
+      if(roi){
+        let raw=await zxingDecode(roi);
         if(raw && acceptRaw(raw)) return;
       }
 
       const now=Date.now();
-      if(!enhancedFrameScan.lastHeavy || now-enhancedFrameScan.lastHeavy>650){
+      if(!enhancedFrameScan.lastHeavy || now-enhancedFrameScan.lastHeavy>850){
         enhancedFrameScan.lastHeavy=now;
-        for(const mode of ['gray','contrast']){
-          const band=makeCanvas(video,0.02,0.31,0.96,0.25,mode,0,0);
-          if(!band) continue;
-          let raw=await zxingLinearDecode(band);
+        const gray=makeVisibleCanvas(video,0.035,0.29,0.93,0.38,'gray');
+        if(gray){
+          let raw=await zxingDecode(gray);
           if(raw && acceptRaw(raw)) return;
-          raw=await quaggaDecode(band);
+          raw=await quaggaDecode(gray);
           if(raw && acceptRaw(raw)) return;
         }
       }
@@ -380,48 +389,38 @@
   }
 
   async function startScanner() {
-    if (starting || controls) return;
-    const video = $('liveVideo');
-    const status = $('ocrStatus');
-    if (!video) return;
+    if(starting || controls) return;
+    const video=$('liveVideo'), status=$('ocrStatus');
+    if(!video) return;
 
-    if (!window.ZXingBrowser?.BrowserMultiFormatReader) {
-      if (status) status.textContent = '⚠️ Čitalnik kode se še ni naložil. Osveži stran.';
-      return;
-    }
+    starting=true;
+    if($('startCameraBtn')) $('startCameraBtn').style.display='none';
+    if($('stopCameraBtn')) $('stopCameraBtn').style.display='';
+    if(status) status.textContent='📷 Kamera je vključena · drži črtno kodo v rdečem okvirju.';
 
-    starting = true;
-    if ($('startCameraBtn')) $('startCameraBtn').style.display = 'none';
-    if ($('stopCameraBtn')) $('stopCameraBtn').style.display = '';
-    if (status) status.textContent = '📷 Kamera je vključena · poravnaj kodo v rumeni okvir.';
-
-    try {
-      liveReader ||= new ZXingBrowser.BrowserMultiFormatReader(undefined, {delayBetweenScanAttempts:55});
-      const constraints = {
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({
         audio:false,
         video:{
           facingMode:{ideal:'environment'},
           width:{ideal:1920},
           height:{ideal:1080},
-          frameRate:{ideal:30}
+          frameRate:{ideal:30,max:30}
         }
-      };
-
-      controls = await liveReader.decodeFromConstraints(constraints, video, result => {
-        if (!result) return;
-        const raw = typeof result.getText === 'function' ? result.getText() : (result.text || String(result));
-        acceptRaw(raw);
       });
-      starting = false;
-      scanStartedAt = Date.now();
-      lastOcrAt = 0;
+      video.srcObject=stream;
+      await video.play();
+      controls={stop:()=>stream.getTracks().forEach(t=>t.stop())};
+      starting=false;
       await tuneCamera(video);
 
       clearPolling();
-      pollTimer = setInterval(enhancedFrameScan, 160);
-    } catch (e) {
-      console.warn('Live scanner:', e);
-      stopScanner('⚠️ Kamera se ni odprla. Pritisni »Vklopi kamero« in dovoli dostop do kamere.');
+      // En dekoder naenkrat. To ohrani predogled kamere gladek na iPhonu.
+      pollTimer=setInterval(enhancedFrameScan,240);
+      setTimeout(enhancedFrameScan,120);
+    }catch(e){
+      console.warn('Live scanner:',e);
+      stopScanner('⚠️ Kamera se ni odprla. Dovoli dostop do kamere in poskusi ponovno.');
     }
   }
 
@@ -529,8 +528,8 @@
       #liveScannerWrap{margin-top:10px}
       #videoBox{position:relative;width:100%;aspect-ratio:3/4;max-height:68vh;background:#111;border-radius:14px;overflow:hidden;border:2px solid #0b5e3b}
       #liveVideo{width:100%;height:100%;object-fit:cover;display:block;background:#111}
-      #scanFrame{position:absolute;left:4%;right:4%;top:31%;height:34%;border:3px solid #f3c94f;border-radius:14px;box-shadow:0 0 0 9999px #0004;pointer-events:none;transition:.15s}
-      #scanFrame::after{content:'DRŽI CELO KODO V OKVIRJU';position:absolute;left:0;right:0;bottom:-34px;text-align:center;color:#fff;font-weight:800;font-size:12px;text-shadow:0 1px 3px #000}
+      #scanFrame{position:absolute;left:4%;right:4%;top:32%;height:30%;border:3px solid #f3c94f;border-radius:14px;box-shadow:0 0 0 9999px #0004;pointer-events:none;transition:.15s}
+      #scanFrame::after{content:'DRŽI ČRTNO KODO V OKVIRJU';position:absolute;left:0;right:0;bottom:-34px;text-align:center;color:#fff;font-weight:800;font-size:12px;text-shadow:0 1px 3px #000}
       #scanFrame.found{border-color:#39d353;box-shadow:0 0 0 9999px #0002,0 0 22px #39d353}
       #cameraButtons{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
       #cameraButtons button{flex:1;min-width:150px}

@@ -90,6 +90,22 @@ input,select{color:#111 !important;border-color:#d71920 !important}
 th{background:#111 !important;color:#fff !important}
 .help,.status,td{color:#111111}
 #scanFrame{border-color:#d71920 !important}
+#topActions{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin:0 0 14px;
+}
+#topActions button{
+  width:100%;
+  min-height:52px;
+  font-size:16px;
+  box-shadow:0 2px 8px #00000020;
+}
+@media(max-width:520px){
+  #topActions{grid-template-columns:1fr 1fr;gap:8px}
+  #topActions button{padding:12px 8px;font-size:15px}
+}
 </style>
 </head>
 <body>
@@ -102,6 +118,10 @@ th{background:#111 !important;color:#fff !important}
   <div id="runtimeWarning" class="runtime-warning">
     <strong>⚠️ Aplikacija je odprta kot datoteka, ne kot spletna stran.</strong>
     Kamera/OCR in izvoz lahko v iCloud/Google Drive predogledu ne delujejo. Objavi mapo na HTTPS gostovanju in odpri povezavo v Safari/Chrome.
+  </div>
+  <div id="topActions">
+    <button class="ok" id="saveBtn">💾 Shrani vrstico</button>
+    <button class="secondary" id="newBtn">📷 Naslednji števec</button>
   </div>
   <section class="card">
     <div class="counter">1. Slikaj števec</div>
@@ -139,10 +159,6 @@ th{background:#111 !important;color:#fff !important}
       </div>
     </div>
     <p>Stanje: <span id="validationStatus" class="status">—</span></p>
-    <div class="btnrow">
-      <button class="ok" id="saveBtn">💾 Shrani vrstico</button>
-      <button class="secondary" id="newBtn">📷 Naslednji števec</button>
-    </div>
   </section>
 
   <section class="card">

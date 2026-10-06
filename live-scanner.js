@@ -198,6 +198,7 @@
     c.width = Math.max(1, Math.round(sw*scale));
     c.height = Math.max(1, Math.round(sh*scale));
     const ctx = c.getContext('2d', {alpha:false, willReadFrequently:true});
+    ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = '#fff'; ctx.fillRect(0,0,c.width,c.height);
     if (mode === 'gray') ctx.filter = 'grayscale(1) contrast(1.55) brightness(1.05)';
     else if (mode === 'contrast') ctx.filter = 'grayscale(1) contrast(2.25) brightness(1.10)';
@@ -263,6 +264,27 @@
     } catch (_) { return null; }
   }
 
+  async function zxingLinearDecode(canvas) {
+    if (!canvas || !window.ZXing?.MultiFormatReader) return null;
+    try {
+      const hints = new Map();
+      if (ZXing.DecodeHintType?.POSSIBLE_FORMATS && ZXing.BarcodeFormat) {
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+          ZXing.BarcodeFormat.CODE_128,
+          ZXing.BarcodeFormat.CODE_39,
+          ZXing.BarcodeFormat.ITF,
+          ZXing.BarcodeFormat.CODABAR
+        ]);
+      }
+      if (ZXing.DecodeHintType?.TRY_HARDER) hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      const reader = new ZXing.BrowserMultiFormatReader(hints, 20);
+      const result = await reader.decodeFromCanvas(canvas);
+      const raw = typeof result?.getText === 'function' ? result.getText() : (result?.text || '');
+      const p = parseCode(raw);
+      return p?.tip && p?.mkn ? raw : null;
+    } catch (_) { return null; }
+  }
+
   async function nativeDecode(canvas) {
     if (!canvas || !('BarcodeDetector' in window)) return null;
     try {
@@ -285,7 +307,7 @@
 
   async function decodeCanvas(canvas, useQuagga=true) {
     if (!canvas) return null;
-    return (await nativeDecode(canvas)) || (await zxingDecode(canvas)) || (useQuagga ? await quaggaDecode(canvas) : null);
+    return (await zxingLinearDecode(canvas)) || (await nativeDecode(canvas)) || (await zxingDecode(canvas)) || (useQuagga ? await quaggaDecode(canvas) : null);
   }
 
   async function ensureOcrWorker() {
@@ -325,30 +347,30 @@
     if(!video || video.readyState<2 || !video.videoWidth) return;
     enhancedBusy=true;
     try{
-      // Koda je dolga in nizka. Namesto velikega okvirja dekoderju pošljemo
-      // več ozkih pasov, zato so črte večje in ostrejše.
+      // Ozki pasovi čez rdeči okvir. Brez umetnega povečanja, da črte ostanejo ostre.
       const strips=[
-        [0.03,0.34,0.94,0.16],
-        [0.03,0.38,0.94,0.16],
-        [0.03,0.42,0.94,0.16],
-        [0.03,0.46,0.94,0.16],
-        [0.03,0.31,0.94,0.24]
+        [0.02,0.34,0.96,0.13],
+        [0.02,0.38,0.96,0.13],
+        [0.02,0.42,0.96,0.13],
+        [0.02,0.46,0.96,0.13],
+        [0.02,0.31,0.96,0.22]
       ];
       for(const [x,y,w,h] of strips){
-        const rawCanvas=makeCanvas(video,x,y,w,h,'raw',1800,420);
-        if(!rawCanvas) continue;
-        let raw=await decodeCanvas(rawCanvas,false);
+        const frame=makeCanvas(video,x,y,w,h,'raw',0,0);
+        if(!frame) continue;
+        let raw=await decodeCanvas(frame,false);
         if(raw && acceptRaw(raw)) return;
       }
 
-      // Enkrat na ~0,7 s naredimo močnejši Code128 poskus.
       const now=Date.now();
-      if(!enhancedFrameScan.lastHeavy || now-enhancedFrameScan.lastHeavy>700){
+      if(!enhancedFrameScan.lastHeavy || now-enhancedFrameScan.lastHeavy>650){
         enhancedFrameScan.lastHeavy=now;
-        for(const mode of ['raw','gray','contrast']){
-          const band=makeCanvas(video,0.02,0.31,0.96,0.28,mode,1900,480);
+        for(const mode of ['gray','contrast']){
+          const band=makeCanvas(video,0.02,0.31,0.96,0.25,mode,0,0);
           if(!band) continue;
-          const raw=await quaggaDecode(band);
+          let raw=await zxingLinearDecode(band);
+          if(raw && acceptRaw(raw)) return;
+          raw=await quaggaDecode(band);
           if(raw && acceptRaw(raw)) return;
         }
       }
@@ -379,8 +401,8 @@
         audio:false,
         video:{
           facingMode:{ideal:'environment'},
-          width:{ideal:2560},
-          height:{ideal:1440},
+          width:{ideal:1920},
+          height:{ideal:1080},
           frameRate:{ideal:30}
         }
       };

@@ -225,46 +225,32 @@
 
   async function quaggaDecode(canvas) {
     if (!canvas || !window.Quagga?.decodeSingle) return null;
-    return await new Promise(resolve => {
-      let done = false;
-      const finish = v => { if (!done) { done = true; resolve(v); } };
-      const timer = setTimeout(() => finish(null), 1200);
-      try {
-        Quagga.decodeSingle({
-          src: canvas.toDataURL('image/jpeg', 0.96),
-          numOfWorkers: 0,
-          locate: true,
-          inputStream: {size: 0},
-          locator: {halfSample:false, patchSize:'medium'},
-          decoder: {
-            readers:[
-              'code_128_reader','code_39_reader','code_93_reader',
-              'i2of5_reader','2of5_reader','codabar_reader',
-              'ean_reader','ean_8_reader','upc_reader','upc_e_reader'
-            ],
-            multiple:true
-          }
-        }, result => {
-          clearTimeout(timer);
 
-          // Pri več črtnih kodah na istem števcu izberi samo tisto,
-          // ki dejansko vsebuje veljaven 4-mestni TIP + 8-mestni MKN.
-          const results = Array.isArray(result) ? result : (result ? [result] : []);
-          for (const item of results) {
-            const raw = item?.codeResult?.code || '';
-            const parsed = parseCode(raw);
-            if (parsed?.tip && parsed?.mkn) {
-              finish(raw);
-              return;
-            }
-          }
-          finish(null);
+    const run = readers => new Promise(resolve => {
+      let done=false;
+      const finish=v=>{if(!done){done=true;resolve(v);}};
+      const timer=setTimeout(()=>finish(null),650);
+      try{
+        Quagga.decodeSingle({
+          src:canvas.toDataURL('image/png'),
+          numOfWorkers:0,
+          locate:true,
+          inputStream:{size:0},
+          locator:{halfSample:false,patchSize:'large'},
+          decoder:{readers,multiple:false}
+        }, result=>{
+          clearTimeout(timer);
+          const raw=result?.codeResult?.code || '';
+          const p=parseCode(raw);
+          finish(p?.tip && p?.mkn ? raw : null);
         });
-      } catch (_) {
-        clearTimeout(timer);
-        finish(null);
-      }
+      }catch(_){clearTimeout(timer);finish(null);}
     });
+
+    // Ti števci uporabljajo dolgo linearno kodo; Code128 poskusimo samostojno,
+    // ker množica readerjev pri zamegljeni sliki zmanjša zanesljivost.
+    return (await run(['code_128_reader'])) ||
+           (await run(['code_39_reader','code_93_reader','i2of5_reader','2of5_reader']));
   }
 
   async function zxingDecode(canvas) {
@@ -335,58 +321,39 @@
 
   async function enhancedFrameScan() {
     if (enhancedBusy || !controls) return;
-    const video = $('liveVideo');
-    if (!video || video.readyState < 2 || !video.videoWidth) return;
-    enhancedBusy = true;
-
-    try {
-      // Rumeni okvir je dejansko območje branja: 4%/31%/92%/34%.
-      // Najprej vedno dekodiramo originalno sliko brez filtrov.
-      const roi = makeCanvas(video,0.04,0.31,0.92,0.34,'raw',1500,360);
-      if (roi) {
-        let raw = await decodeCanvas(roi,false);
-        if (raw && acceptRaw(raw)) return;
-
-        // Drugi hitri poskus: sivina z blagim kontrastom.
-        const gray = makeCanvas(video,0.04,0.31,0.92,0.34,'gray',1500,360);
-        raw = await decodeCanvas(gray,false);
-        if (raw && acceptRaw(raw)) return;
+    const video=$('liveVideo');
+    if(!video || video.readyState<2 || !video.videoWidth) return;
+    enhancedBusy=true;
+    try{
+      // Koda je dolga in nizka. Namesto velikega okvirja dekoderju pošljemo
+      // več ozkih pasov, zato so črte večje in ostrejše.
+      const strips=[
+        [0.03,0.34,0.94,0.16],
+        [0.03,0.38,0.94,0.16],
+        [0.03,0.42,0.94,0.16],
+        [0.03,0.46,0.94,0.16],
+        [0.03,0.31,0.94,0.24]
+      ];
+      for(const [x,y,w,h] of strips){
+        const rawCanvas=makeCanvas(video,x,y,w,h,'raw',1800,420);
+        if(!rawCanvas) continue;
+        let raw=await decodeCanvas(rawCanvas,false);
+        if(raw && acceptRaw(raw)) return;
       }
 
-      // Širši pas pomaga, če koda malo uide iz rumenega okvirja.
-      const wide = makeCanvas(video,0.02,0.22,0.96,0.54,'raw',1500,0);
-      if (wide) {
-        let raw = await decodeCanvas(wide,false);
-        if (raw && acceptRaw(raw)) return;
-      }
-
-      // Počasnejša rezerva samo občasno: Quagga + kontrast.
-      // enhancedFrameScan se kliče hitro, zato Quagge ne poganjamo vsak krog.
-      const now = Date.now();
-      if (!enhancedFrameScan.lastHeavy || now-enhancedFrameScan.lastHeavy > 900) {
+      // Enkrat na ~0,7 s naredimo močnejši Code128 poskus.
+      const now=Date.now();
+      if(!enhancedFrameScan.lastHeavy || now-enhancedFrameScan.lastHeavy>700){
         enhancedFrameScan.lastHeavy=now;
-        const contrast = makeCanvas(video,0.04,0.27,0.92,0.44,'contrast',1500,360);
-        if (contrast) {
-          let raw = await decodeCanvas(contrast,true);
-          if (raw && acceptRaw(raw)) return;
-
-          // Odsev lahko izbriše del črt; trije pragovi dajo različne robove.
-          for (const t of [145,175,205]) {
-            raw = await decodeCanvas(thresholdCanvas(contrast,t),false);
-            if (raw && acceptRaw(raw)) return;
-          }
-        }
-
-        // Navpična koda.
-        if (roi) {
-          for (const angle of [90,270]) {
-            const raw = await decodeCanvas(rotateCanvas(roi,angle),false);
-            if (raw && acceptRaw(raw)) return;
-          }
+        for(const mode of ['raw','gray','contrast']){
+          const band=makeCanvas(video,0.02,0.31,0.96,0.28,mode,1900,480);
+          if(!band) continue;
+          const raw=await quaggaDecode(band);
+          if(raw && acceptRaw(raw)) return;
         }
       }
-    } finally {
-      enhancedBusy = false;
+    }finally{
+      enhancedBusy=false;
     }
   }
 
@@ -429,7 +396,7 @@
       await tuneCamera(video);
 
       clearPolling();
-      pollTimer = setInterval(enhancedFrameScan, 120);
+      pollTimer = setInterval(enhancedFrameScan, 160);
     } catch (e) {
       console.warn('Live scanner:', e);
       stopScanner('⚠️ Kamera se ni odprla. Pritisni »Vklopi kamero« in dovoli dostop do kamere.');
